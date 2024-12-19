@@ -140,6 +140,85 @@ Status Values:
 
 These tags provide a clear audit trail of the migration process and help identify any issues that need attention.
 
+## Usage
+
+The tool provides three main commands:
+
+### 1. Migrate
+
+Migrate instances to a new AMI version:
+
+```bash
+# Migrate instances by tag
+ami-migrate migrate --new-ami ami-xxxxx
+
+# Migrate specific instance
+ami-migrate migrate --new-ami ami-xxxxx --instance-id i-xxxxx
+```
+
+Optional flags:
+- `--latest-tag`: Tag value for the current latest AMI (default: "latest")
+- `--enabled-value`: Value to match for the ami-migrate tag (default: "enabled")
+- `--instance-id`: ID of specific instance to migrate (bypasses tag requirements)
+
+### 2. Backup
+
+Create snapshots of all volumes attached to instances:
+
+```bash
+# Backup instances by tag
+ami-migrate backup
+
+# Backup specific instance
+ami-migrate backup --instance-id i-xxxxx
+```
+
+Optional flags:
+- `--enabled-value`: Value to match for the ami-migrate tag (default: "enabled")
+- `--instance-id`: ID of specific instance to backup (bypasses tag requirements)
+
+The backup command will:
+1. Find all instances with the ami-migrate tag (or use specified instance)
+2. Create snapshots of all attached volumes
+3. Tag snapshots with instance and device information
+
+### 3. Restore
+
+Restore a volume from a snapshot to an instance:
+
+```bash
+ami-migrate restore --snapshot-id snap-xxxxx --instance-id i-xxxxx
+```
+
+Required flags:
+- `--snapshot-id`: ID of the snapshot to restore from
+- `--instance-id`: ID of the instance to restore to
+
+The restore command will:
+1. Create a new volume from the snapshot
+2. Stop the instance if it's running
+3. Attach the volume to the instance using the original device name
+
+### CI/CD Integration
+
+For GitLab CI, add this to your `.gitlab-ci.yml`:
+
+```yaml
+ami-migrate:
+  image: golang:1.21-alpine
+  script:
+    - go install github.com/taemon1337/ami-migrate@latest
+    - ami-migrate migrate --new-ami $NEW_AMI_ID
+  rules:
+    - if: $CI_COMMIT_TAG  # Only run on tags
+```
+
+Make sure to set these environment variables in GitLab:
+- `AWS_ACCESS_KEY_ID`
+- `AWS_SECRET_ACCESS_KEY`
+- `AWS_REGION`
+- `NEW_AMI_ID`
+
 ## Development
 
 ### Available Make Commands

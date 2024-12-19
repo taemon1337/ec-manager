@@ -11,16 +11,20 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
 )
 
-// EC2ClientAPI defines the interface for EC2 client operations
+// EC2ClientAPI defines the AWS EC2 client interface
 type EC2ClientAPI interface {
-	DescribeImages(ctx context.Context, params *ec2.DescribeImagesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeImagesOutput, error)
 	DescribeInstances(ctx context.Context, params *ec2.DescribeInstancesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error)
+	CreateTags(ctx context.Context, params *ec2.CreateTagsInput, optFns ...func(*ec2.Options)) (*ec2.CreateTagsOutput, error)
+	DescribeImages(ctx context.Context, params *ec2.DescribeImagesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeImagesOutput, error)
 	CreateSnapshot(ctx context.Context, params *ec2.CreateSnapshotInput, optFns ...func(*ec2.Options)) (*ec2.CreateSnapshotOutput, error)
-	TerminateInstances(ctx context.Context, params *ec2.TerminateInstancesInput, optFns ...func(*ec2.Options)) (*ec2.TerminateInstancesOutput, error)
-	RunInstances(ctx context.Context, params *ec2.RunInstancesInput, optFns ...func(*ec2.Options)) (*ec2.RunInstancesOutput, error)
 	StopInstances(ctx context.Context, params *ec2.StopInstancesInput, optFns ...func(*ec2.Options)) (*ec2.StopInstancesOutput, error)
 	StartInstances(ctx context.Context, params *ec2.StartInstancesInput, optFns ...func(*ec2.Options)) (*ec2.StartInstancesOutput, error)
-	CreateTags(ctx context.Context, params *ec2.CreateTagsInput, optFns ...func(*ec2.Options)) (*ec2.CreateTagsOutput, error)
+	RunInstances(ctx context.Context, params *ec2.RunInstancesInput, optFns ...func(*ec2.Options)) (*ec2.RunInstancesOutput, error)
+	TerminateInstances(ctx context.Context, params *ec2.TerminateInstancesInput, optFns ...func(*ec2.Options)) (*ec2.TerminateInstancesOutput, error)
+	DescribeSnapshots(ctx context.Context, params *ec2.DescribeSnapshotsInput, optFns ...func(*ec2.Options)) (*ec2.DescribeSnapshotsOutput, error)
+	CreateVolume(ctx context.Context, params *ec2.CreateVolumeInput, optFns ...func(*ec2.Options)) (*ec2.CreateVolumeOutput, error)
+	DescribeVolumes(ctx context.Context, params *ec2.DescribeVolumesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeVolumesOutput, error)
+	AttachVolume(ctx context.Context, params *ec2.AttachVolumeInput, optFns ...func(*ec2.Options)) (*ec2.AttachVolumeOutput, error)
 }
 
 // Service provides AMI management operations
@@ -100,7 +104,7 @@ func (s *Service) MigrateInstances(ctx context.Context, oldAMI, newAMI, enabledV
 			s.tagInstanceStatus(ctx, inst, "in-progress", "Starting migration")
 
 			// If instance needs to be started
-			if needsStart && inst.State.Name != types.InstanceStateNameRunning {
+			if needsStart && string(inst.State.Name) != string(types.InstanceStateNameRunning) {
 				if err := s.startInstance(ctx, inst); err != nil {
 					s.tagInstanceStatus(ctx, inst, "failed", fmt.Sprintf("Failed to start instance: %v", err))
 					return
@@ -108,13 +112,13 @@ func (s *Service) MigrateInstances(ctx context.Context, oldAMI, newAMI, enabledV
 			}
 
 			// Perform migration
-			if err := s.upgradeInstance(ctx, newAMI, inst); err != nil {
+			if err := s.upgradeInstance(ctx, inst, newAMI); err != nil {
 				s.tagInstanceStatus(ctx, inst, "failed", fmt.Sprintf("Failed to upgrade instance: %v", err))
 				return
 			}
 
 			// If we started the instance, stop it again
-			if needsStart && inst.State.Name != types.InstanceStateNameRunning {
+			if needsStart && string(inst.State.Name) != string(types.InstanceStateNameRunning) {
 				if err := s.stopInstance(ctx, inst); err != nil {
 					s.tagInstanceStatus(ctx, inst, "warning", fmt.Sprintf("Migration successful but failed to stop instance: %v", err))
 					return
@@ -152,7 +156,7 @@ func (s *Service) fetchEnabledInstances(ctx context.Context, enabledValue string
 }
 
 func (s *Service) shouldMigrateInstance(instance types.Instance) (bool, bool) {
-	isRunning := instance.State.Name == types.InstanceStateNameRunning
+	isRunning := string(instance.State.Name) == string(types.InstanceStateNameRunning)
 	hasIfRunningTag := false
 
 	// Check for if-running tag
@@ -205,7 +209,7 @@ func (s *Service) stopInstance(ctx context.Context, instance types.Instance) err
 	}, 5*time.Minute)
 }
 
-func (s *Service) upgradeInstance(ctx context.Context, newAMI string, instance types.Instance) error {
+func (s *Service) upgradeInstance(ctx context.Context, instance types.Instance, newAMI string) error {
 	// Create snapshot of the instance's volumes
 	for _, mapping := range instance.BlockDeviceMappings {
 		if mapping.Ebs != nil {
@@ -221,7 +225,7 @@ func (s *Service) upgradeInstance(ctx context.Context, newAMI string, instance t
 	}
 
 	// Stop the instance
-	if instance.State.Name == types.InstanceStateNameRunning {
+	if string(instance.State.Name) == string(types.InstanceStateNameRunning) {
 		if err := s.stopInstance(ctx, instance); err != nil {
 			return fmt.Errorf("stop instance: %w", err)
 		}
@@ -296,4 +300,292 @@ func (s *Service) tagInstanceStatus(ctx context.Context, instance types.Instance
 
 	_, err := s.client.CreateTags(ctx, input)
 	return err
+}
+
+func (s *Service) BackupInstances(ctx context.Context, enabledValue string) error {
+	// Get instances with ami-migrate tag
+	instances, err := s.getInstances(ctx, enabledValue)
+	if err != nil {
+		return fmt.Errorf("failed to get instances: %w", err)
+	}
+
+	for _, instance := range instances {
+		// Check if instance should be backed up based on state
+		if string(instance.State.Name) == string(types.InstanceStateNameRunning) {
+			// Check if running instance has the required tag
+			if !hasTag(instance.Tags, "ami-migrate-if-running", enabledValue) {
+				s.tagInstanceStatus(ctx, instance, "skipped", "Running instance without ami-migrate-if-running tag")
+				continue
+			}
+		}
+
+		s.tagInstanceStatus(ctx, instance, "in-progress", "Creating volume snapshots")
+
+		// Create snapshots for each volume
+		for _, device := range instance.BlockDeviceMappings {
+			if device.Ebs == nil {
+				continue
+			}
+
+			description := fmt.Sprintf("Backup of volume %s from instance %s",
+				aws.ToString(device.Ebs.VolumeId),
+				aws.ToString(instance.InstanceId))
+
+			input := &ec2.CreateSnapshotInput{
+				VolumeId:    device.Ebs.VolumeId,
+				Description: aws.String(description),
+				TagSpecifications: []types.TagSpecification{
+					{
+						ResourceType: types.ResourceTypeSnapshot,
+						Tags: []types.Tag{
+							{
+								Key:   aws.String("ami-migrate-instance"),
+								Value: instance.InstanceId,
+							},
+							{
+								Key:   aws.String("ami-migrate-device"),
+								Value: device.DeviceName,
+							},
+						},
+					},
+				},
+			}
+
+			_, err := s.client.CreateSnapshot(ctx, input)
+			if err != nil {
+				s.tagInstanceStatus(ctx, instance, "failed", fmt.Sprintf("Failed to create snapshot: %v", err))
+				return fmt.Errorf("failed to create snapshot: %w", err)
+			}
+		}
+
+		s.tagInstanceStatus(ctx, instance, "completed", "Volume snapshots created successfully")
+	}
+
+	return nil
+}
+
+func (s *Service) RestoreInstance(ctx context.Context, instanceID, snapshotID string) error {
+	// Get instance
+	input := &ec2.DescribeInstancesInput{
+		InstanceIds: []string{instanceID},
+	}
+	result, err := s.client.DescribeInstances(ctx, input)
+	if err != nil {
+		return fmt.Errorf("failed to get instance: %w", err)
+	}
+	if len(result.Reservations) == 0 || len(result.Reservations[0].Instances) == 0 {
+		return fmt.Errorf("instance not found: %s", instanceID)
+	}
+	instance := result.Reservations[0].Instances[0]
+
+	// Get snapshot
+	snapInput := &ec2.DescribeSnapshotsInput{
+		SnapshotIds: []string{snapshotID},
+	}
+	snapResult, err := s.client.DescribeSnapshots(ctx, snapInput)
+	if err != nil {
+		return fmt.Errorf("failed to get snapshot: %w", err)
+	}
+	if len(snapResult.Snapshots) == 0 {
+		return fmt.Errorf("snapshot not found: %s", snapshotID)
+	}
+	snapshot := snapResult.Snapshots[0]
+
+	// Create volume from snapshot
+	createVolumeInput := &ec2.CreateVolumeInput{
+		AvailabilityZone: instance.Placement.AvailabilityZone,
+		SnapshotId:       aws.String(snapshotID),
+		VolumeType:       types.VolumeTypeGp2, // Use GP2 by default
+	}
+	volume, err := s.client.CreateVolume(ctx, createVolumeInput)
+	if err != nil {
+		return fmt.Errorf("failed to create volume: %w", err)
+	}
+
+	// Wait for volume to be available
+	waiter := ec2.NewVolumeAvailableWaiter(s.client)
+	if err := waiter.Wait(ctx, &ec2.DescribeVolumesInput{
+		VolumeIds: []string{aws.ToString(volume.VolumeId)},
+	}, 5*time.Minute); err != nil {
+		return fmt.Errorf("volume did not become available: %w", err)
+	}
+
+	// Stop instance if running
+	if string(instance.State.Name) == string(types.InstanceStateNameRunning) {
+		stopInput := &ec2.StopInstancesInput{
+			InstanceIds: []string{instanceID},
+		}
+		if _, err := s.client.StopInstances(ctx, stopInput); err != nil {
+			return fmt.Errorf("failed to stop instance: %w", err)
+		}
+
+		// Wait for instance to stop
+		stopWaiter := ec2.NewInstanceStoppedWaiter(s.client)
+		if err := stopWaiter.Wait(ctx, &ec2.DescribeInstancesInput{
+			InstanceIds: []string{instanceID},
+		}, 5*time.Minute); err != nil {
+			return fmt.Errorf("instance did not stop: %w", err)
+		}
+	}
+
+	// Get device name from snapshot tags
+	var deviceName string
+	for _, tag := range snapshot.Tags {
+		if aws.ToString(tag.Key) == "ami-migrate-device" {
+			deviceName = aws.ToString(tag.Value)
+			break
+		}
+	}
+	if deviceName == "" {
+		deviceName = "/dev/xvdf" // default device if not found
+	}
+
+	// Attach volume
+	attachInput := &ec2.AttachVolumeInput{
+		Device:     aws.String(deviceName),
+		InstanceId: aws.String(instanceID),
+		VolumeId:   volume.VolumeId,
+	}
+	if _, err := s.client.AttachVolume(ctx, attachInput); err != nil {
+		return fmt.Errorf("failed to attach volume: %w", err)
+	}
+
+	return nil
+}
+
+func hasTag(tags []types.Tag, key, value string) bool {
+	for _, tag := range tags {
+		if aws.ToString(tag.Key) == key && aws.ToString(tag.Value) == value {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Service) getInstances(ctx context.Context, enabledValue string) ([]types.Instance, error) {
+	input := &ec2.DescribeInstancesInput{
+		Filters: []types.Filter{
+			{
+				Name:   aws.String("tag:ami-migrate"),
+				Values: []string{enabledValue},
+			},
+		},
+	}
+
+	resp, err := s.client.DescribeInstances(ctx, input)
+	if err != nil {
+		return nil, err
+	}
+
+	var instances []types.Instance
+	for _, reservation := range resp.Reservations {
+		instances = append(instances, reservation.Instances...)
+	}
+	return instances, nil
+}
+
+func (s *Service) MigrateInstance(ctx context.Context, instanceID, oldAMI, newAMI string) error {
+	// Get instance
+	input := &ec2.DescribeInstancesInput{
+		InstanceIds: []string{instanceID},
+	}
+	result, err := s.client.DescribeInstances(ctx, input)
+	if err != nil {
+		return fmt.Errorf("failed to get instance: %w", err)
+	}
+	if len(result.Reservations) == 0 || len(result.Reservations[0].Instances) == 0 {
+		return fmt.Errorf("instance not found: %s", instanceID)
+	}
+	instance := result.Reservations[0].Instances[0]
+
+	// Check if instance is using the old AMI
+	if aws.ToString(instance.ImageId) != oldAMI {
+		return fmt.Errorf("instance %s is not using AMI %s (current: %s)", instanceID, oldAMI, aws.ToString(instance.ImageId))
+	}
+
+	// Start migration
+	s.tagInstanceStatus(ctx, instance, "in-progress", "Starting migration")
+
+	// If instance is running, we need to stop it
+	needsStart := string(instance.State.Name) == string(types.InstanceStateNameRunning)
+	if needsStart {
+		if err := s.stopInstance(ctx, instance); err != nil {
+			s.tagInstanceStatus(ctx, instance, "failed", fmt.Sprintf("Failed to stop instance: %v", err))
+			return fmt.Errorf("stop instance: %w", err)
+		}
+	}
+
+	// Migrate the instance
+	if err := s.upgradeInstance(ctx, instance, newAMI); err != nil {
+		s.tagInstanceStatus(ctx, instance, "failed", fmt.Sprintf("Failed to upgrade instance: %v", err))
+		return fmt.Errorf("upgrade instance: %w", err)
+	}
+
+	// If we stopped the instance, start it again
+	if needsStart {
+		if err := s.startInstance(ctx, instance); err != nil {
+			s.tagInstanceStatus(ctx, instance, "warning", fmt.Sprintf("Migration successful but failed to start instance: %v", err))
+			return nil
+		}
+	}
+
+	s.tagInstanceStatus(ctx, instance, "completed", "Migration completed successfully")
+	return nil
+}
+
+func (s *Service) BackupInstance(ctx context.Context, instanceID string) error {
+	// Get instance
+	input := &ec2.DescribeInstancesInput{
+		InstanceIds: []string{instanceID},
+	}
+	result, err := s.client.DescribeInstances(ctx, input)
+	if err != nil {
+		return fmt.Errorf("failed to get instance: %w", err)
+	}
+	if len(result.Reservations) == 0 || len(result.Reservations[0].Instances) == 0 {
+		return fmt.Errorf("instance not found: %s", instanceID)
+	}
+	instance := result.Reservations[0].Instances[0]
+
+	s.tagInstanceStatus(ctx, instance, "in-progress", "Creating volume snapshots")
+
+	// Create snapshots for each volume
+	for _, device := range instance.BlockDeviceMappings {
+		if device.Ebs == nil {
+			continue
+		}
+
+		description := fmt.Sprintf("Backup of volume %s from instance %s",
+			aws.ToString(device.Ebs.VolumeId),
+			aws.ToString(instance.InstanceId))
+
+		input := &ec2.CreateSnapshotInput{
+			VolumeId:    device.Ebs.VolumeId,
+			Description: aws.String(description),
+			TagSpecifications: []types.TagSpecification{
+				{
+					ResourceType: types.ResourceTypeSnapshot,
+					Tags: []types.Tag{
+						{
+							Key:   aws.String("ami-migrate-instance"),
+							Value: instance.InstanceId,
+						},
+						{
+							Key:   aws.String("ami-migrate-device"),
+							Value: device.DeviceName,
+						},
+					},
+				},
+			},
+		}
+
+		_, err := s.client.CreateSnapshot(ctx, input)
+		if err != nil {
+			s.tagInstanceStatus(ctx, instance, "failed", fmt.Sprintf("Failed to create snapshot: %v", err))
+			return fmt.Errorf("failed to create snapshot: %w", err)
+		}
+	}
+
+	s.tagInstanceStatus(ctx, instance, "completed", "Volume snapshots created successfully")
+	return nil
 }

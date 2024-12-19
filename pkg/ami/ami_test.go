@@ -12,21 +12,29 @@ import (
 )
 
 type MockEC2Client struct {
-	describeImagesOutput  *ec2.DescribeImagesOutput
-	describeImagesError   error
+	describeImagesOutput    *ec2.DescribeImagesOutput
+	describeImagesError     error
 	describeInstancesOutput *ec2.DescribeInstancesOutput
 	describeInstancesError  error
-	createSnapshotOutput *ec2.CreateSnapshotOutput
-	createSnapshotError  error
+	createSnapshotOutput   *ec2.CreateSnapshotOutput
+	createSnapshotError    error
 	terminateInstancesOutput *ec2.TerminateInstancesOutput
 	terminateInstancesError  error
-	runInstancesOutput *ec2.RunInstancesOutput
-	runInstancesError  error
-	createTagsError    error
-	stopInstancesOutput *ec2.StopInstancesOutput
-	stopInstancesError  error
-	startInstancesOutput *ec2.StartInstancesOutput
-	startInstancesError  error
+	runInstancesOutput     *ec2.RunInstancesOutput
+	runInstancesError      error
+	createTagsError        error
+	stopInstancesOutput    *ec2.StopInstancesOutput
+	stopInstancesError     error
+	startInstancesOutput   *ec2.StartInstancesOutput
+	startInstancesError    error
+	attachVolumeOutput    *ec2.AttachVolumeOutput
+	attachVolumeError     error
+	createVolumeOutput    *ec2.CreateVolumeOutput
+	createVolumeError     error
+	describeSnapshotsOutput *ec2.DescribeSnapshotsOutput
+	describeSnapshotsError  error
+	describeVolumesOutput  *ec2.DescribeVolumesOutput
+	describeVolumesError   error
 }
 
 func (m *MockEC2Client) DescribeImages(ctx context.Context, params *ec2.DescribeImagesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeImagesOutput, error) {
@@ -34,23 +42,10 @@ func (m *MockEC2Client) DescribeImages(ctx context.Context, params *ec2.Describe
 }
 
 func (m *MockEC2Client) DescribeInstances(ctx context.Context, params *ec2.DescribeInstancesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
-	// For waiters, always return the desired state immediately
-	if len(params.InstanceIds) == 1 {
-		inst := types.Instance{
-			InstanceId: aws.String(params.InstanceIds[0]),
-			State: &types.InstanceState{
-				Name: types.InstanceStateNameRunning,
-			},
-		}
-		return &ec2.DescribeInstancesOutput{
-			Reservations: []types.Reservation{
-				{
-					Instances: []types.Instance{inst},
-				},
-			},
-		}, nil
+	if m.describeInstancesError != nil {
+		return nil, m.describeInstancesError
 	}
-	return m.describeInstancesOutput, m.describeInstancesError
+	return m.describeInstancesOutput, nil
 }
 
 func (m *MockEC2Client) CreateSnapshot(ctx context.Context, params *ec2.CreateSnapshotInput, optFns ...func(*ec2.Options)) (*ec2.CreateSnapshotOutput, error) {
@@ -75,6 +70,22 @@ func (m *MockEC2Client) StopInstances(ctx context.Context, params *ec2.StopInsta
 
 func (m *MockEC2Client) StartInstances(ctx context.Context, params *ec2.StartInstancesInput, optFns ...func(*ec2.Options)) (*ec2.StartInstancesOutput, error) {
 	return m.startInstancesOutput, m.startInstancesError
+}
+
+func (m *MockEC2Client) AttachVolume(ctx context.Context, params *ec2.AttachVolumeInput, optFns ...func(*ec2.Options)) (*ec2.AttachVolumeOutput, error) {
+	return m.attachVolumeOutput, m.attachVolumeError
+}
+
+func (m *MockEC2Client) CreateVolume(ctx context.Context, params *ec2.CreateVolumeInput, optFns ...func(*ec2.Options)) (*ec2.CreateVolumeOutput, error) {
+	return m.createVolumeOutput, m.createVolumeError
+}
+
+func (m *MockEC2Client) DescribeSnapshots(ctx context.Context, params *ec2.DescribeSnapshotsInput, optFns ...func(*ec2.Options)) (*ec2.DescribeSnapshotsOutput, error) {
+	return m.describeSnapshotsOutput, m.describeSnapshotsError
+}
+
+func (m *MockEC2Client) DescribeVolumes(ctx context.Context, params *ec2.DescribeVolumesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeVolumesOutput, error) {
+	return m.describeVolumesOutput, m.describeVolumesError
 }
 
 func TestGetAMIWithTag(t *testing.T) {
@@ -317,6 +328,184 @@ func TestTagAMI(t *testing.T) {
 			s := NewService(mockClient)
 			err := s.TagAMI(context.Background(), tt.amiID, tt.tagKey, tt.tagValue)
 
+			if tt.expectedError && err == nil {
+				t.Error("expected error but got none")
+			}
+			if !tt.expectedError && err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+func TestMigrateInstance(t *testing.T) {
+	tests := []struct {
+		name          string
+		instanceID    string
+		oldAMI        string
+		newAMI        string
+		mockClient    *MockEC2Client
+		expectedError bool
+	}{
+		{
+			name:       "successful_migration",
+			instanceID: "i-123",
+			oldAMI:     "ami-old",
+			newAMI:     "ami-new",
+			mockClient: &MockEC2Client{
+				describeInstancesOutput: &ec2.DescribeInstancesOutput{
+					Reservations: []types.Reservation{
+						{
+							Instances: []types.Instance{
+								{
+									InstanceId: aws.String("i-123"),
+									ImageId:    aws.String("ami-old"),
+									State: &types.InstanceState{
+										Name: types.InstanceStateNameStopped,
+									},
+								},
+							},
+						},
+					},
+				},
+				stopInstancesOutput:  &ec2.StopInstancesOutput{},
+				startInstancesOutput: &ec2.StartInstancesOutput{},
+				runInstancesOutput: &ec2.RunInstancesOutput{
+					Instances: []types.Instance{
+						{
+							InstanceId: aws.String("i-new"),
+						},
+					},
+				},
+			},
+			expectedError: false,
+		},
+		{
+			name:       "wrong_AMI",
+			instanceID: "i-123",
+			oldAMI:     "ami-old",
+			newAMI:     "ami-new",
+			mockClient: &MockEC2Client{
+				describeInstancesOutput: &ec2.DescribeInstancesOutput{
+					Reservations: []types.Reservation{
+						{
+							Instances: []types.Instance{
+								{
+									InstanceId: aws.String("i-123"),
+									ImageId:    aws.String("ami-different"),
+								},
+							},
+						},
+					},
+				},
+			},
+			expectedError: true,
+		},
+		{
+			name:       "instance_not_found",
+			instanceID: "i-123",
+			oldAMI:     "ami-old",
+			newAMI:     "ami-new",
+			mockClient: &MockEC2Client{
+				describeInstancesOutput: &ec2.DescribeInstancesOutput{},
+			},
+			expectedError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc := NewService(tt.mockClient)
+			err := svc.MigrateInstance(context.Background(), tt.instanceID, tt.oldAMI, tt.newAMI)
+			if tt.expectedError && err == nil {
+				t.Error("expected error but got none")
+			}
+			if !tt.expectedError && err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+func TestBackupInstance(t *testing.T) {
+	tests := []struct {
+		name          string
+		instanceID    string
+		mockClient    *MockEC2Client
+		expectedError bool
+	}{
+		{
+			name:       "successful_backup",
+			instanceID: "i-123",
+			mockClient: &MockEC2Client{
+				describeInstancesOutput: &ec2.DescribeInstancesOutput{
+					Reservations: []types.Reservation{
+						{
+							Instances: []types.Instance{
+								{
+									InstanceId: aws.String("i-123"),
+									BlockDeviceMappings: []types.InstanceBlockDeviceMapping{
+										{
+											DeviceName: aws.String("/dev/sda1"),
+											Ebs: &types.EbsInstanceBlockDevice{
+												VolumeId: aws.String("vol-123"),
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+				createSnapshotOutput: &ec2.CreateSnapshotOutput{
+					SnapshotId: aws.String("snap-123"),
+				},
+			},
+			expectedError: false,
+		},
+		{
+			name:       "instance_not_found",
+			instanceID: "i-123",
+			mockClient: &MockEC2Client{
+				describeInstancesOutput: &ec2.DescribeInstancesOutput{
+					Reservations: []types.Reservation{},
+				},
+			},
+			expectedError: true,
+		},
+		{
+			name:       "snapshot_creation_fails",
+			instanceID: "i-123",
+			mockClient: &MockEC2Client{
+				describeInstancesOutput: &ec2.DescribeInstancesOutput{
+					Reservations: []types.Reservation{
+						{
+							Instances: []types.Instance{
+								{
+									InstanceId: aws.String("i-123"),
+									BlockDeviceMappings: []types.InstanceBlockDeviceMapping{
+										{
+											DeviceName: aws.String("/dev/sda1"),
+											Ebs: &types.EbsInstanceBlockDevice{
+												VolumeId: aws.String("vol-123"),
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+				createSnapshotError: fmt.Errorf("failed to create snapshot"),
+			},
+			expectedError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc := NewService(tt.mockClient)
+			err := svc.BackupInstance(context.Background(), tt.instanceID)
 			if tt.expectedError && err == nil {
 				t.Error("expected error but got none")
 			}

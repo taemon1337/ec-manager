@@ -30,7 +30,7 @@ DOCKER_RUN_OPTS=--rm \
 	--user $(UID):$(GID)
 
 # PHONY targets
-.PHONY: all build clean test lint docker-build docker-test help
+.PHONY: all build clean test lint docker-build docker-test docker-tidy help
 
 # Default target
 all: clean build test
@@ -45,6 +45,7 @@ help:
 	@echo "  make lint       - Run linter in Docker"
 	@echo "  make docker-build - Build Docker image"
 	@echo "  make docker-test  - Run tests in Docker"
+	@echo "  make docker-tidy - Run go mod tidy in Docker"
 	@echo "  make shell      - Open a shell in the Docker container"
 
 # Build the binary
@@ -93,6 +94,13 @@ docker-test:
 	docker run $(DOCKER_RUN_OPTS) \
 		golang:$(GO_VERSION)-alpine \
 		/bin/sh -c "go test -v ./..."
+
+# Run go mod tidy in Docker
+docker-tidy:
+	@echo "Running go mod tidy in Docker..."
+	docker run --rm -v $(PWD):/app -v $(HOME)/.cache/go-mod:/go/pkg/mod -v $(HOME)/.cache/go-build:/.cache/go-build -w /app --user $(shell id -u):$(shell id -g) \
+		golang:1.21-alpine \
+		/bin/sh -c "go get github.com/spf13/cobra && go mod tidy"
 
 # Create go.mod if it doesn't exist
 init:
