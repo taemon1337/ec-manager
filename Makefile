@@ -2,7 +2,12 @@
 BINARY_NAME=ami-migrate
 DOCKER_IMAGE=ami-migrate
 GO_VERSION=1.21
+GOCACHE=${HOME}/.cache/go-build
+GOLANGCI=${HOME}/.cache/golangci-lint
+GOMODCACHE=${HOME}/.cache/go-mod
 SHELL=/bin/bash
+UID=$(shell id -u)
+GID=$(shell id -g)
 
 # Go related variables
 GOBASE=$(shell pwd)
@@ -14,6 +19,15 @@ VERSION=$(shell git describe --tags 2>/dev/null || echo "dev")
 
 # Add the date to the build information
 BUILD_DATE=$(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+# Docker run common options
+DOCKER_RUN_OPTS=--rm \
+	-v $(GOBASE):/app \
+	-v $(GOLANGCI):/.cache/golangci-lint \
+	-v $(GOCACHE):/.cache/go-build \
+	-v $(GOMODCACHE):/go/pkg/mod \
+	-w /app \
+	--user $(UID):$(GID)
 
 # PHONY targets
 .PHONY: all build clean test lint docker-build docker-test help
@@ -31,16 +45,21 @@ help:
 	@echo "  make lint       - Run linter in Docker"
 	@echo "  make docker-build - Build Docker image"
 	@echo "  make docker-test  - Run tests in Docker"
+	@echo "  make shell      - Open a shell in the Docker container"
 
 # Build the binary
 build:
 	@echo "Building $(BINARY_NAME)..."
-	docker run --rm \
-		-v $(GOBASE):/app \
-		-w /app \
+	docker run $(DOCKER_RUN_OPTS) \
 		golang:$(GO_VERSION)-alpine \
 		go build -o $(BINARY_NAME) \
 		-ldflags "-X main.Version=$(VERSION) -X main.BuildDate=$(BUILD_DATE)"
+
+# Interactive shell
+shell:
+	docker run -it $(DOCKER_RUN_OPTS) \
+		golang:$(GO_VERSION)-alpine \
+		/bin/sh
 
 # Clean build artifacts
 clean:
@@ -51,18 +70,14 @@ clean:
 # Run tests
 test:
 	@echo "Running tests..."
-	docker run --rm \
-		-v $(GOBASE):/app \
-		-w /app \
+	docker run $(DOCKER_RUN_OPTS) \
 		golang:$(GO_VERSION)-alpine \
 		go test -v ./...
 
 # Run linter
 lint:
 	@echo "Running linter..."
-	docker run --rm \
-		-v $(GOBASE):/app \
-		-w /app \
+	docker run $(DOCKER_RUN_OPTS) \
 		golangci/golangci-lint:latest \
 		golangci-lint run ./...
 
@@ -75,9 +90,7 @@ docker-build:
 # Run tests in Docker
 docker-test:
 	@echo "Running tests in Docker..."
-	docker run --rm \
-		-v $(GOBASE):/app \
-		-w /app \
+	docker run $(DOCKER_RUN_OPTS) \
 		golang:$(GO_VERSION)-alpine \
 		/bin/sh -c "go test -v ./..."
 
@@ -85,9 +98,7 @@ docker-test:
 init:
 	@if [ ! -f go.mod ]; then \
 		echo "Initializing go.mod..."; \
-		docker run --rm \
-			-v $(GOBASE):/app \
-			-w /app \
+		docker run $(DOCKER_RUN_OPTS) \
 			golang:$(GO_VERSION)-alpine \
 			go mod init github.com/taemon1337/ami-migrate; \
 	fi
