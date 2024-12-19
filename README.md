@@ -13,6 +13,7 @@ A Go-based tool for managing AWS AMI migrations. This tool helps automate the pr
 - Selective instance migration based on tags
 - Migration of instances regardless of current AMI
 - Smart instance state handling
+- Automatic AMI version management (latest/previous)
 
 ## Prerequisites
 
@@ -43,42 +44,42 @@ make docker-build
 docker run --rm \
   -v ~/.aws:/root/.aws:ro \
   ami-migrate:latest \
-  --new-ami ami-xxxxx \
-  --latest-tag latest \
-  --enabled-value enabled
+  migrate \
+  --new-ami ami-xxxxx
 ```
 
 ## CLI Arguments
 
-- `--new-ami` (required): The ID of the new AMI to upgrade instances to
-- `--latest-tag` (optional, default: "latest"): The tag used to track the current AMI version
+### Global Flags
 - `--enabled-value` (optional, default: "enabled"): Value to match for the "ami-migrate" tag
+
+### Migrate Command
+- `--new-ami` (required): The ID of the new AMI to upgrade instances to
+- `--instance-id` (optional): ID of specific instance to migrate (bypasses tag requirements)
+
+### Backup Command
+- `--instance-id` (optional): ID of specific instance to backup (bypasses tag requirements)
 
 ## How It Works
 
 1. **AMI Version Management**:
    - The tool tracks AMI versions using tags
-   - When a new AMI is specified, the old "latest" AMI is archived
+   - When a new AMI is specified, the old "latest" AMI is marked as "previous"
    - The new AMI becomes the "latest" version
+   - If no AMI is marked as "latest", the new AMI is used as both old and new
 
 2. **Instance Selection**:
    - Instances are selected for migration if they have `ami-migrate=enabled`
-   - Running instances are migrated immediately
-   - Stopped instances are handled based on additional tags
+   - Running instances require both `ami-migrate=enabled` and `ami-migrate-if-running=enabled`
+   - Stopped instances only require `ami-migrate=enabled`
 
-3. **Instance State Handling**:
-   - Running instances: Migrated directly
-   - Stopped instances with `ami-migrate-if-running=enabled`: 
-     1. Instance is started
-     2. Migration is performed
-     3. Instance is returned to its original state
-   - Stopped instances without the if-running tag: Skipped
-   - Failed migrations are tagged for tracking
-
-4. **Migration Process**:
-   - Migrations run in parallel for faster updates
+3. **Migration Process**:
    - Each instance's volumes are snapshotted before migration
-   - Instance state is preserved throughout the process
+   - The instance is stopped if running
+   - A new instance is created with the target AMI
+   - All tags are copied to the new instance
+   - The old instance is terminated
+   - If the instance was running, it is started again
    - Comprehensive error handling and status tracking
 
 ## Instance Tagging
@@ -125,24 +126,18 @@ Key: ami-migrate-message
 Value: [detailed message]  # Explains the current status
 ```
 
-3. Timestamp Tag:
-```
-Key: ami-migrate-timestamp
-Value: [UTC timestamp]  # Format: RFC3339
-```
-
 Status Values:
 - `skipped`: Instance was not migrated (e.g., running instance without required tags)
 - `in-progress`: Migration has started
 - `failed`: Migration failed (error message in ami-migrate-message)
-- `warning`: Migration partially successful (e.g., migrated but failed to stop)
+- `warning`: Migration partially successful (e.g., migrated but failed to start)
 - `completed`: Migration completed successfully
 
 These tags provide a clear audit trail of the migration process and help identify any issues that need attention.
 
 ## Usage
 
-The tool provides three main commands:
+The tool provides two main commands:
 
 ### 1. Migrate
 
@@ -157,7 +152,6 @@ ami-migrate migrate --new-ami ami-xxxxx --instance-id i-xxxxx
 ```
 
 Optional flags:
-- `--latest-tag`: Tag value for the current latest AMI (default: "latest")
 - `--enabled-value`: Value to match for the ami-migrate tag (default: "enabled")
 - `--instance-id`: ID of specific instance to migrate (bypasses tag requirements)
 
@@ -181,23 +175,6 @@ The backup command will:
 1. Find all instances with the ami-migrate tag (or use specified instance)
 2. Create snapshots of all attached volumes
 3. Tag snapshots with instance and device information
-
-### 3. Restore
-
-Restore a volume from a snapshot to an instance:
-
-```bash
-ami-migrate restore --snapshot-id snap-xxxxx --instance-id i-xxxxx
-```
-
-Required flags:
-- `--snapshot-id`: ID of the snapshot to restore from
-- `--instance-id`: ID of the instance to restore to
-
-The restore command will:
-1. Create a new volume from the snapshot
-2. Stop the instance if it's running
-3. Attach the volume to the instance using the original device name
 
 ### CI/CD Integration
 
@@ -240,6 +217,10 @@ ami-migrate/
 ├── Dockerfile          # Multi-stage Docker build
 ├── Makefile           # Build automation
 ├── main.go            # Entry point
+├── cmd/               # CLI commands
+│   ├── backup.go      # Backup command
+│   ├── migrate.go     # Migrate command
+│   └── root.go        # Root command
 ├── pkg/
 │   └── ami/           # AMI management package
 │       ├── ami.go     # Core AMI operations
@@ -262,9 +243,8 @@ When running the containerized version, mount your AWS credentials:
 docker run --rm \
   -v ~/.aws:/root/.aws:ro \
   ami-migrate:latest \
-  --new-ami ami-xxxxx \
-  --latest-tag latest \
-  --enabled-value enabled
+  migrate \
+  --new-ami ami-xxxxx
 ```
 
 ## License
