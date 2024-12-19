@@ -89,6 +89,7 @@ func (s *Service) MigrateInstances(ctx context.Context, oldAMI, newAMI, enabledV
 	for _, instance := range instances {
 		shouldMigrate, needsStart := s.shouldMigrateInstance(instance)
 		if !shouldMigrate {
+			s.tagInstanceStatus(ctx, instance, "skipped", "Instance state or tags do not meet migration criteria")
 			continue
 		}
 
@@ -96,26 +97,31 @@ func (s *Service) MigrateInstances(ctx context.Context, oldAMI, newAMI, enabledV
 		go func(inst types.Instance, start bool) {
 			defer wg.Done()
 
+			s.tagInstanceStatus(ctx, inst, "in-progress", "Starting migration")
+
 			// If instance needs to be started
-			if start && inst.State.Name != types.InstanceStateNameRunning {
+			if needsStart && inst.State.Name != types.InstanceStateNameRunning {
 				if err := s.startInstance(ctx, inst); err != nil {
-					s.tagInstanceAsFailed(ctx, inst)
+					s.tagInstanceStatus(ctx, inst, "failed", fmt.Sprintf("Failed to start instance: %v", err))
 					return
 				}
 			}
 
 			// Perform migration
 			if err := s.upgradeInstance(ctx, newAMI, inst); err != nil {
-				s.tagInstanceAsFailed(ctx, inst)
+				s.tagInstanceStatus(ctx, inst, "failed", fmt.Sprintf("Failed to upgrade instance: %v", err))
 				return
 			}
 
 			// If we started the instance, stop it again
-			if start && inst.State.Name != types.InstanceStateNameRunning {
+			if needsStart && inst.State.Name != types.InstanceStateNameRunning {
 				if err := s.stopInstance(ctx, inst); err != nil {
-					s.tagInstanceAsFailed(ctx, inst)
+					s.tagInstanceStatus(ctx, inst, "warning", fmt.Sprintf("Migration successful but failed to stop instance: %v", err))
+					return
 				}
 			}
+
+			s.tagInstanceStatus(ctx, inst, "completed", "Migration completed successfully")
 		}(instance, needsStart)
 	}
 	wg.Wait()
@@ -147,19 +153,24 @@ func (s *Service) fetchEnabledInstances(ctx context.Context, enabledValue string
 
 func (s *Service) shouldMigrateInstance(instance types.Instance) (bool, bool) {
 	isRunning := instance.State.Name == types.InstanceStateNameRunning
-	shouldStart := false
+	hasIfRunningTag := false
 
 	// Check for if-running tag
 	for _, tag := range instance.Tags {
 		if aws.ToString(tag.Key) == "ami-migrate-if-running" &&
 			aws.ToString(tag.Value) == "enabled" {
-			shouldStart = true
+			hasIfRunningTag = true
 			break
 		}
 	}
 
-	// Migrate if running or has if-running tag
-	return isRunning || shouldStart, shouldStart
+	// If instance is running, we need both tags
+	if isRunning {
+		return hasIfRunningTag, false
+	}
+
+	// If instance is stopped, we only need ami-migrate tag (which is already checked in fetchEnabledInstances)
+	return true, false
 }
 
 func (s *Service) startInstance(ctx context.Context, instance types.Instance) error {
@@ -200,6 +211,8 @@ func (s *Service) upgradeInstance(ctx context.Context, newAMI string, instance t
 		if mapping.Ebs != nil {
 			_, err := s.client.CreateSnapshot(ctx, &ec2.CreateSnapshotInput{
 				VolumeId: mapping.Ebs.VolumeId,
+				Description: aws.String(fmt.Sprintf("Backup before AMI migration for instance %s",
+					aws.ToString(instance.InstanceId))),
 			})
 			if err != nil {
 				return fmt.Errorf("create snapshot: %w", err)
@@ -207,37 +220,80 @@ func (s *Service) upgradeInstance(ctx context.Context, newAMI string, instance t
 		}
 	}
 
-	// Terminate the old instance
-	_, err := s.client.TerminateInstances(ctx, &ec2.TerminateInstancesInput{
+	// Stop the instance
+	if instance.State.Name == types.InstanceStateNameRunning {
+		if err := s.stopInstance(ctx, instance); err != nil {
+			return fmt.Errorf("stop instance: %w", err)
+		}
+	}
+
+	// Create new instance with new AMI
+	runInput := &ec2.RunInstancesInput{
+		ImageId:      aws.String(newAMI),
+		InstanceType: instance.InstanceType,
+		MinCount:     aws.Int32(1),
+		MaxCount:     aws.Int32(1),
+	}
+
+	runResult, err := s.client.RunInstances(ctx, runInput)
+	if err != nil {
+		return fmt.Errorf("run instances: %w", err)
+	}
+
+	// Terminate old instance
+	_, err = s.client.TerminateInstances(ctx, &ec2.TerminateInstancesInput{
 		InstanceIds: []string{aws.ToString(instance.InstanceId)},
 	})
 	if err != nil {
 		return fmt.Errorf("terminate instance: %w", err)
 	}
 
-	// Launch new instance with the new AMI
-	_, err = s.client.RunInstances(ctx, &ec2.RunInstancesInput{
-		ImageId:      aws.String(newAMI),
-		InstanceType: instance.InstanceType,
-		MinCount:     aws.Int32(1),
-		MaxCount:     aws.Int32(1),
-	})
-	if err != nil {
-		return fmt.Errorf("run instance: %w", err)
+	// Copy tags to new instance
+	if err := s.copyTags(ctx, instance, runResult.Instances[0]); err != nil {
+		return fmt.Errorf("copy tags: %w", err)
 	}
 
 	return nil
 }
 
-func (s *Service) tagInstanceAsFailed(ctx context.Context, instance types.Instance) {
+func (s *Service) copyTags(ctx context.Context, oldInstance, newInstance types.Instance) error {
+	var tags []types.Tag
+	for _, tag := range oldInstance.Tags {
+		// Skip the migration status tag
+		if aws.ToString(tag.Key) == "ami-migrate-status" {
+			continue
+		}
+		tags = append(tags, tag)
+	}
+
+	input := &ec2.CreateTagsInput{
+		Resources: []string{aws.ToString(newInstance.InstanceId)},
+		Tags:      tags,
+	}
+
+	_, err := s.client.CreateTags(ctx, input)
+	return err
+}
+
+func (s *Service) tagInstanceStatus(ctx context.Context, instance types.Instance, status, message string) error {
 	input := &ec2.CreateTagsInput{
 		Resources: []string{aws.ToString(instance.InstanceId)},
 		Tags: []types.Tag{
 			{
 				Key:   aws.String("ami-migrate-status"),
-				Value: aws.String("failed"),
+				Value: aws.String(status),
+			},
+			{
+				Key:   aws.String("ami-migrate-message"),
+				Value: aws.String(message),
+			},
+			{
+				Key:   aws.String("ami-migrate-timestamp"),
+				Value: aws.String(time.Now().UTC().Format(time.RFC3339)),
 			},
 		},
 	}
-	_, _ = s.client.CreateTags(ctx, input)
+
+	_, err := s.client.CreateTags(ctx, input)
+	return err
 }

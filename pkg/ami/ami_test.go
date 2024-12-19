@@ -151,40 +151,22 @@ func TestMigrateInstances(t *testing.T) {
 		instances         []types.Instance
 		mockError         error
 		expectedError     bool
-		shouldStart       bool
-		shouldStop        bool
+		shouldMigrate     bool
 	}{
 		{
-			name: "successful migration of running instance",
+			name: "running instance with both tags should migrate",
 			instances: []types.Instance{
 				{
 					InstanceId:   aws.String("i-123"),
 					State:        &types.InstanceState{Name: types.InstanceStateNameRunning},
 					InstanceType: types.InstanceTypeT2Micro,
-					BlockDeviceMappings: []types.InstanceBlockDeviceMapping{
-						{
-							Ebs: &types.EbsInstanceBlockDevice{
-								VolumeId: aws.String("vol-123"),
-							},
-						},
-					},
-				},
-			},
-			mockError:     nil,
-			expectedError: false,
-			shouldStart:   false,
-			shouldStop:    false,
-		},
-		{
-			name: "successful migration of stopped instance with if-running tag",
-			instances: []types.Instance{
-				{
-					InstanceId:   aws.String("i-123"),
-					State:        &types.InstanceState{Name: types.InstanceStateNameStopped},
-					InstanceType: types.InstanceTypeT2Micro,
 					Tags: []types.Tag{
 						{
 							Key:   aws.String("ami-migrate-if-running"),
+							Value: aws.String("enabled"),
+						},
+						{
+							Key:   aws.String("ami-migrate"),
 							Value: aws.String("enabled"),
 						},
 					},
@@ -199,22 +181,59 @@ func TestMigrateInstances(t *testing.T) {
 			},
 			mockError:     nil,
 			expectedError: false,
-			shouldStart:   true,
-			shouldStop:    true,
+			shouldMigrate: true,
 		},
 		{
-			name: "skip stopped instance without if-running tag",
+			name: "running instance without if-running tag should not migrate",
+			instances: []types.Instance{
+				{
+					InstanceId:   aws.String("i-123"),
+					State:        &types.InstanceState{Name: types.InstanceStateNameRunning},
+					InstanceType: types.InstanceTypeT2Micro,
+					Tags: []types.Tag{
+						{
+							Key:   aws.String("ami-migrate"),
+							Value: aws.String("enabled"),
+						},
+					},
+					BlockDeviceMappings: []types.InstanceBlockDeviceMapping{
+						{
+							Ebs: &types.EbsInstanceBlockDevice{
+								VolumeId: aws.String("vol-123"),
+							},
+						},
+					},
+				},
+			},
+			mockError:     nil,
+			expectedError: false,
+			shouldMigrate: false,
+		},
+		{
+			name: "stopped instance should migrate with only ami-migrate tag",
 			instances: []types.Instance{
 				{
 					InstanceId:   aws.String("i-123"),
 					State:        &types.InstanceState{Name: types.InstanceStateNameStopped},
 					InstanceType: types.InstanceTypeT2Micro,
+					Tags: []types.Tag{
+						{
+							Key:   aws.String("ami-migrate"),
+							Value: aws.String("enabled"),
+						},
+					},
+					BlockDeviceMappings: []types.InstanceBlockDeviceMapping{
+						{
+							Ebs: &types.EbsInstanceBlockDevice{
+								VolumeId: aws.String("vol-123"),
+							},
+						},
+					},
 				},
 			},
 			mockError:     nil,
 			expectedError: false,
-			shouldStart:   false,
-			shouldStop:    false,
+			shouldMigrate: true,
 		},
 	}
 
@@ -235,7 +254,16 @@ func TestMigrateInstances(t *testing.T) {
 				describeInstancesError:   tt.mockError,
 				createSnapshotOutput:     &ec2.CreateSnapshotOutput{SnapshotId: aws.String("snap-123")},
 				terminateInstancesOutput: &ec2.TerminateInstancesOutput{},
-				runInstancesOutput:      &ec2.RunInstancesOutput{},
+				runInstancesOutput: &ec2.RunInstancesOutput{
+					Instances: []types.Instance{
+						{
+							InstanceId: aws.String("i-new123"),
+							State: &types.InstanceState{
+								Name: types.InstanceStateNamePending,
+							},
+						},
+					},
+				},
 				stopInstancesOutput:     &ec2.StopInstancesOutput{},
 				startInstancesOutput:    &ec2.StartInstancesOutput{},
 			}

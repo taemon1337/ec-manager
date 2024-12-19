@@ -98,12 +98,47 @@ Value: enabled
 ```
 
 Tag Combinations and Behavior:
-- `ami-migrate=enabled` only:
-  - Running instances: Will be migrated
-  - Stopped instances: Will be skipped
-- `ami-migrate=enabled` AND `ami-migrate-if-running=enabled`:
-  - Running instances: Will be migrated
-  - Stopped instances: Will be started, migrated, then stopped again
+- Running instances:
+  - Requires BOTH `ami-migrate=enabled` AND `ami-migrate-if-running=enabled`
+  - Will be skipped if missing either tag
+- Stopped instances:
+  - Only requires `ami-migrate=enabled`
+  - Will be migrated regardless of `ami-migrate-if-running` tag
+
+This ensures that:
+1. Running instances are only migrated when explicitly allowed via both tags
+2. Stopped instances can be safely migrated with just the main migration tag
+
+## Migration Status Tracking
+
+The tool tracks migration status using the following tags:
+
+1. Status Tag:
+```
+Key: ami-migrate-status
+Value: [status]  # One of: skipped, in-progress, failed, warning, completed
+```
+
+2. Message Tag:
+```
+Key: ami-migrate-message
+Value: [detailed message]  # Explains the current status
+```
+
+3. Timestamp Tag:
+```
+Key: ami-migrate-timestamp
+Value: [UTC timestamp]  # Format: RFC3339
+```
+
+Status Values:
+- `skipped`: Instance was not migrated (e.g., running instance without required tags)
+- `in-progress`: Migration has started
+- `failed`: Migration failed (error message in ami-migrate-message)
+- `warning`: Migration partially successful (e.g., migrated but failed to stop)
+- `completed`: Migration completed successfully
+
+These tags provide a clear audit trail of the migration process and help identify any issues that need attention.
 
 ## Development
 
