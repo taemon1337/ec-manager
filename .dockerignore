@@ -1,0 +1,23 @@
+# Git
+.git
+.gitignore
+
+# Docker
+Dockerfile
+.dockerignore
+
+# Binaries and build artifacts
+bin/
+ami-migrate
+
+# IDE specific files
+.idea/
+.vscode/
+
+# Temporary files
+*.swp
+*.swo
+*~
+
+# Test files
+*_test.go
