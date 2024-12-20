@@ -53,6 +53,37 @@ docker run --rm \
 ### Global Flags
 - `--enabled-value` (optional, default: "enabled"): Value to match for the "ami-migrate" tag
 
+### Check Command
+- `--user` (required): Your user ID to find your instance (matches Owner tag)
+
+Example:
+```bash
+ami-migrate check --user johndoe
+```
+
+Output:
+```
+Instance Status for i-1234567890abcdef0:
+  OS Type:        RHEL9
+  Instance Type:  t3.micro
+  State:          running
+  Launch Time:    2024-12-19T20:00:00Z
+  Private IP:     10.0.0.100
+  Public IP:      54.123.45.67
+
+AMI Status:
+  Current AMI:    ami-0abc123def456
+    Name:         RHEL-9.2-20231201
+    Created:      2023-12-01T00:00:00Z
+  Latest AMI:     ami-0xyz789uvw123
+    Name:         RHEL-9.2-20231219
+    Created:      2023-12-19T00:00:00Z
+
+Migration Needed: true
+
+Run 'ami-migrate migrate' to update your instance to the latest AMI.
+```
+
 ### Migrate Command
 - `--new-ami` (required): The ID of the new AMI to upgrade instances to
 - `--instance-id` (optional): ID of specific instance to migrate (bypasses tag requirements)
@@ -84,7 +115,7 @@ docker run --rm \
 
 ## Instance Tagging
 
-Two tags control the migration behavior:
+Three tags control the instance behavior:
 
 1. Main Migration Tag:
 ```
@@ -96,6 +127,12 @@ Value: enabled  # or your custom value specified with --enabled-value
 ```
 Key: ami-migrate-if-running
 Value: enabled
+```
+
+3. Owner Tag (Required for check command):
+```
+Key: Owner
+Value: <your-user-id>  # Used to identify your instance
 ```
 
 Tag Combinations and Behavior:
@@ -137,9 +174,17 @@ These tags provide a clear audit trail of the migration process and help identif
 
 ## Usage
 
-The tool provides two main commands:
+The tool provides three main commands:
 
-### 1. Migrate
+### 1. Check
+
+Check the status of your instance and determine if a migration is needed:
+
+```bash
+ami-migrate check --user johndoe
+```
+
+### 2. Migrate
 
 Migrate instances to a new AMI version:
 
@@ -155,7 +200,7 @@ Optional flags:
 - `--enabled-value`: Value to match for the ami-migrate tag (default: "enabled")
 - `--instance-id`: ID of specific instance to migrate (bypasses tag requirements)
 
-### 2. Backup
+### 3. Backup
 
 Create snapshots of all volumes attached to instances:
 
@@ -219,6 +264,7 @@ ami-migrate/
 ├── main.go            # Entry point
 ├── cmd/               # CLI commands
 │   ├── backup.go      # Backup command
+│   ├── check.go       # Check command
 │   ├── migrate.go     # Migrate command
 │   └── root.go        # Root command
 ├── pkg/

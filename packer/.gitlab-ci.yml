@@ -1,0 +1,75 @@
+variables:
+  AWS_DEFAULT_REGION: "${AWS_REGION}"
+
+# Weekly AMI builds at 1 AM UTC on Sundays
+.weekly-schedule: &weekly-schedule
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $CI_SCHEDULE == "weekly-ami-builds"
+      when: always
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      when: manual
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      when: never
+
+stages:
+  - validate
+  - build
+
+validate:
+  stage: validate
+  image: hashicorp/packer:latest
+  script:
+    - packer init rhel9/rhel9.pkr.hcl
+    - packer init ubuntu/ubuntu.pkr.hcl
+    - packer validate rhel9/rhel9.pkr.hcl
+    - packer validate ubuntu/ubuntu.pkr.hcl
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+
+build-rhel9:
+  stage: build
+  image: hashicorp/packer:latest
+  before_script:
+    - apk add --no-cache python3 py3-pip
+    - python3 -m pip install --break-system-packages --no-cache-dir awscli
+  script:
+    - packer init rhel9/rhel9.pkr.hcl
+    - packer build rhel9/rhel9.pkr.hcl
+  <<: *weekly-schedule
+  variables:
+    AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+    AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+    AWS_REGION: ${AWS_REGION}
+    RHSM_USER: ${RHSM_USER}
+    RHSM_PASS: ${RHSM_PASS}
+
+build-ubuntu:
+  stage: build
+  image: hashicorp/packer:latest
+  before_script:
+    - apk add --no-cache python3 py3-pip
+    - python3 -m pip install --break-system-packages --no-cache-dir awscli
+  script:
+    - packer init ubuntu/ubuntu.pkr.hcl
+    - packer build ubuntu/ubuntu.pkr.hcl
+  <<: *weekly-schedule
+  variables:
+    AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+    AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+    AWS_REGION: ${AWS_REGION}
+
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+
+# Schedule configuration
+schedules:
+  - name: "weekly-ami-builds"
+    cron: "0 1 * * 0"
+    description: "Build AMIs weekly on Sundays at 1 AM UTC"
+    active: true
+    ref: main

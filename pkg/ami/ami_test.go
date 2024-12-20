@@ -515,3 +515,166 @@ func TestBackupInstance(t *testing.T) {
 		})
 	}
 }
+
+func TestCheckMigrationStatus(t *testing.T) {
+	launchTime := time.Now().Add(-24 * time.Hour)
+	tests := []struct {
+		name              string
+		userID            string
+		instance          types.Instance
+		currentAMI        types.Image
+		latestAMI         types.Image
+		describeInstErr   error
+		describeImagesErr error
+		expectError       bool
+		expectMigration   bool
+	}{
+		{
+			name:   "instance needs migration",
+			userID: "user123",
+			instance: types.Instance{
+				InstanceId:     aws.String("i-123"),
+				ImageId:        aws.String("ami-old"),
+				InstanceType:   types.InstanceTypeT2Micro,
+				State:         &types.InstanceState{Name: types.InstanceStateNameRunning},
+				LaunchTime:    aws.Time(launchTime),
+				PlatformDetails: aws.String("Red Hat Enterprise Linux"),
+				PrivateIpAddress: aws.String("10.0.0.1"),
+				PublicIpAddress:  aws.String("54.123.45.67"),
+				Tags: []types.Tag{
+					{Key: aws.String("Owner"), Value: aws.String("user123")},
+				},
+			},
+			currentAMI: types.Image{
+				ImageId:      aws.String("ami-old"),
+				Name:        aws.String("RHEL-9.2-20231201"),
+				Description: aws.String("Red Hat Enterprise Linux 9.2"),
+				CreationDate: aws.String("2023-12-01T00:00:00Z"),
+			},
+			latestAMI: types.Image{
+				ImageId:      aws.String("ami-new"),
+				Name:        aws.String("RHEL-9.2-20231219"),
+				Description: aws.String("Red Hat Enterprise Linux 9.2"),
+				CreationDate: aws.String("2023-12-19T00:00:00Z"),
+				Tags: []types.Tag{
+					{Key: aws.String("ami-migrate"), Value: aws.String("latest")},
+				},
+			},
+			expectError:     false,
+			expectMigration: true,
+		},
+		{
+			name:   "instance up to date",
+			userID: "user123",
+			instance: types.Instance{
+				InstanceId:     aws.String("i-123"),
+				ImageId:        aws.String("ami-latest"),
+				InstanceType:   types.InstanceTypeT2Micro,
+				State:         &types.InstanceState{Name: types.InstanceStateNameRunning},
+				LaunchTime:    aws.Time(launchTime),
+				PlatformDetails: aws.String("Red Hat Enterprise Linux"),
+				PrivateIpAddress: aws.String("10.0.0.1"),
+				PublicIpAddress:  aws.String("54.123.45.67"),
+				Tags: []types.Tag{
+					{Key: aws.String("Owner"), Value: aws.String("user123")},
+				},
+			},
+			currentAMI: types.Image{
+				ImageId:      aws.String("ami-latest"),
+				Name:        aws.String("RHEL-9.2-20231219"),
+				Description: aws.String("Red Hat Enterprise Linux 9.2"),
+				CreationDate: aws.String("2023-12-19T00:00:00Z"),
+				Tags: []types.Tag{
+					{Key: aws.String("ami-migrate"), Value: aws.String("latest")},
+				},
+			},
+			latestAMI: types.Image{
+				ImageId:      aws.String("ami-latest"),
+				Name:        aws.String("RHEL-9.2-20231219"),
+				Description: aws.String("Red Hat Enterprise Linux 9.2"),
+				CreationDate: aws.String("2023-12-19T00:00:00Z"),
+				Tags: []types.Tag{
+					{Key: aws.String("ami-migrate"), Value: aws.String("latest")},
+				},
+			},
+			expectError:     false,
+			expectMigration: false,
+		},
+		{
+			name:            "no instance found",
+			userID:         "user123",
+			describeInstErr: fmt.Errorf("no instances found"),
+			expectError:     true,
+		},
+		{
+			name:   "ami lookup error",
+			userID: "user123",
+			instance: types.Instance{
+				InstanceId:     aws.String("i-123"),
+				ImageId:        aws.String("ami-old"),
+				PlatformDetails: aws.String("Red Hat Enterprise Linux"),
+			},
+			describeImagesErr: fmt.Errorf("ami not found"),
+			expectError:       true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockClient := &MockEC2Client{}
+
+			if tt.instance.InstanceId != nil {
+				mockClient.describeInstancesOutput = &ec2.DescribeInstancesOutput{
+					Reservations: []types.Reservation{
+						{
+							Instances: []types.Instance{tt.instance},
+						},
+					},
+				}
+			}
+			mockClient.describeInstancesError = tt.describeInstErr
+
+			if tt.currentAMI.ImageId != nil {
+				mockClient.describeImagesOutput = &ec2.DescribeImagesOutput{
+					Images: []types.Image{tt.currentAMI},
+				}
+			}
+			if tt.latestAMI.ImageId != nil {
+				// For the second call to DescribeImages (for latest AMI)
+				mockClient.describeImagesOutput = &ec2.DescribeImagesOutput{
+					Images: []types.Image{tt.latestAMI},
+				}
+			}
+			mockClient.describeImagesError = tt.describeImagesErr
+
+			s := NewService(mockClient)
+			status, err := s.CheckMigrationStatus(context.Background(), tt.userID)
+
+			if tt.expectError {
+				if err == nil {
+					t.Error("expected error but got none")
+				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("unexpected error: %v", err)
+				return
+			}
+
+			if status.NeedsMigration != tt.expectMigration {
+				t.Errorf("expected NeedsMigration to be %v but got %v", tt.expectMigration, status.NeedsMigration)
+			}
+
+			if status.InstanceID != aws.ToString(tt.instance.InstanceId) {
+				t.Errorf("expected InstanceID %s but got %s", aws.ToString(tt.instance.InstanceId), status.InstanceID)
+			}
+
+			// Test formatting
+			formatted := status.FormatMigrationStatus()
+			if formatted == "" {
+				t.Error("FormatMigrationStatus returned empty string")
+			}
+		})
+	}
+}

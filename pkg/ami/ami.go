@@ -3,6 +3,7 @@ package ami
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -79,7 +80,7 @@ func (s *Service) TagAMI(ctx context.Context, amiID, tagKey, tagValue string) er
 }
 
 // MigrateInstances migrates instances to new AMI if they have the enabled tag
-func (s *Service) MigrateInstances(ctx context.Context, oldAMI, newAMI, enabledValue string) error {
+func (s *Service) MigrateInstances(ctx context.Context, enabledValue string) error {
 	instances, err := s.fetchEnabledInstances(ctx, enabledValue)
 	if err != nil {
 		return fmt.Errorf("fetch instances: %w", err)
@@ -90,45 +91,31 @@ func (s *Service) MigrateInstances(ctx context.Context, oldAMI, newAMI, enabledV
 	}
 
 	var wg sync.WaitGroup
+	errChan := make(chan error, len(instances))
+
 	for _, instance := range instances {
-		shouldMigrate, needsStart := s.shouldMigrateInstance(instance)
-		if !shouldMigrate {
-			s.tagInstanceStatus(ctx, instance, "skipped", "Instance state or tags do not meet migration criteria")
-			continue
-		}
-
 		wg.Add(1)
-		go func(inst types.Instance, start bool) {
+		go func(inst types.Instance) {
 			defer wg.Done()
-
-			s.tagInstanceStatus(ctx, inst, "in-progress", "Starting migration")
-
-			// If instance needs to be started
-			if needsStart && string(inst.State.Name) != string(types.InstanceStateNameRunning) {
-				if err := s.startInstance(ctx, inst); err != nil {
-					s.tagInstanceStatus(ctx, inst, "failed", fmt.Sprintf("Failed to start instance: %v", err))
-					return
-				}
+			instanceID := aws.ToString(inst.InstanceId)
+			if err := s.MigrateInstance(ctx, instanceID); err != nil {
+				errChan <- fmt.Errorf("migrate instance %s: %w", instanceID, err)
 			}
-
-			// Perform migration
-			if err := s.upgradeInstance(ctx, inst, newAMI); err != nil {
-				s.tagInstanceStatus(ctx, inst, "failed", fmt.Sprintf("Failed to upgrade instance: %v", err))
-				return
-			}
-
-			// If we started the instance, stop it again
-			if needsStart && string(inst.State.Name) != string(types.InstanceStateNameRunning) {
-				if err := s.stopInstance(ctx, inst); err != nil {
-					s.tagInstanceStatus(ctx, inst, "warning", fmt.Sprintf("Migration successful but failed to stop instance: %v", err))
-					return
-				}
-			}
-
-			s.tagInstanceStatus(ctx, inst, "completed", "Migration completed successfully")
-		}(instance, needsStart)
+		}(instance)
 	}
+
 	wg.Wait()
+	close(errChan)
+
+	// Collect any errors
+	var errs []error
+	for err := range errChan {
+		errs = append(errs, err)
+	}
+
+	if len(errs) > 0 {
+		return fmt.Errorf("migration errors: %v", errs)
+	}
 
 	return nil
 }
@@ -484,53 +471,168 @@ func (s *Service) getInstances(ctx context.Context, enabledValue string) ([]type
 	return instances, nil
 }
 
-func (s *Service) MigrateInstance(ctx context.Context, instanceID, oldAMI, newAMI string) error {
-	// Get instance
+func (s *Service) MigrateInstance(ctx context.Context, instanceID string) error {
+	// Determine the OS type
+	osType, err := s.GetInstanceOSType(ctx, instanceID)
+	if err != nil {
+		return fmt.Errorf("get OS type: %w", err)
+	}
+
+	// Get the latest AMI for this OS type
+	latestAMI, err := s.GetLatestAMI(ctx, osType)
+	if err != nil {
+		return fmt.Errorf("get latest AMI: %w", err)
+	}
+
+	// Get the current AMI ID
+	instance, err := s.getInstance(ctx, instanceID)
+	if err != nil {
+		return fmt.Errorf("get instance: %w", err)
+	}
+
+	currentAMI := aws.ToString(instance.ImageId)
+	if currentAMI == latestAMI {
+		return nil // Already on latest AMI
+	}
+
+	// Perform the migration
+	return s.migrateInstanceToAMI(ctx, instance, latestAMI)
+}
+
+func (s *Service) GetLatestAMI(ctx context.Context, osType string) (string, error) {
+	input := &ec2.DescribeImagesInput{
+		Filters: []types.Filter{
+			{
+				Name:   aws.String("tag:ami-migrate"),
+				Values: []string{"latest"},
+			},
+			{
+				Name:   aws.String("tag:OS"),
+				Values: []string{osType},
+			},
+		},
+	}
+
+	result, err := s.client.DescribeImages(ctx, input)
+	if err != nil {
+		return "", fmt.Errorf("describe images: %w", err)
+	}
+
+	if len(result.Images) == 0 {
+		return "", fmt.Errorf("no AMI found for OS type: %s", osType)
+	}
+
+	// Sort images by creation date to get the most recent one
+	latestImage := result.Images[0]
+	for _, image := range result.Images[1:] {
+		if aws.ToString(image.CreationDate) > aws.ToString(latestImage.CreationDate) {
+			latestImage = image
+		}
+	}
+
+	return aws.ToString(latestImage.ImageId), nil
+}
+
+func (s *Service) GetInstanceOSType(ctx context.Context, instanceID string) (string, error) {
 	input := &ec2.DescribeInstancesInput{
 		InstanceIds: []string{instanceID},
 	}
+
 	result, err := s.client.DescribeInstances(ctx, input)
 	if err != nil {
-		return fmt.Errorf("failed to get instance: %w", err)
+		return "", fmt.Errorf("describe instance: %w", err)
 	}
+
 	if len(result.Reservations) == 0 || len(result.Reservations[0].Instances) == 0 {
-		return fmt.Errorf("instance not found: %s", instanceID)
+		return "", fmt.Errorf("instance not found: %s", instanceID)
 	}
+
 	instance := result.Reservations[0].Instances[0]
 
-	// Check if instance is using the old AMI
-	if aws.ToString(instance.ImageId) != oldAMI {
-		return fmt.Errorf("instance %s is not using AMI %s (current: %s)", instanceID, oldAMI, aws.ToString(instance.ImageId))
+	// First check platform details
+	if instance.PlatformDetails != nil {
+		details := aws.ToString(instance.PlatformDetails)
+		switch {
+		case strings.Contains(details, "Red Hat"):
+			return "RHEL9", nil
+		case strings.Contains(details, "Ubuntu"):
+			return "Ubuntu", nil
+		}
 	}
 
-	// Start migration
-	s.tagInstanceStatus(ctx, instance, "in-progress", "Starting migration")
+	// If platform details don't help, check the AMI details
+	if instance.ImageId != nil {
+		imageInput := &ec2.DescribeImagesInput{
+			ImageIds: []string{aws.ToString(instance.ImageId)},
+		}
+		imageResult, err := s.client.DescribeImages(ctx, imageInput)
+		if err == nil && len(imageResult.Images) > 0 {
+			image := imageResult.Images[0]
+			name := aws.ToString(image.Name)
+			description := aws.ToString(image.Description)
 
-	// If instance is running, we need to stop it
-	needsStart := string(instance.State.Name) == string(types.InstanceStateNameRunning)
-	if needsStart {
+			switch {
+			case strings.Contains(strings.ToLower(name), "rhel") || 
+				 strings.Contains(strings.ToLower(description), "red hat"):
+				return "RHEL9", nil
+			case strings.Contains(strings.ToLower(name), "ubuntu") || 
+				 strings.Contains(strings.ToLower(description), "ubuntu"):
+				return "Ubuntu", nil
+			}
+		}
+	}
+
+	// Finally, check instance tags as a fallback
+	for _, tag := range instance.Tags {
+		if aws.ToString(tag.Key) == "OS" {
+			return aws.ToString(tag.Value), nil
+		}
+	}
+
+	return "", fmt.Errorf("unable to determine OS type for instance: %s", instanceID)
+}
+
+func (s *Service) getInstance(ctx context.Context, instanceID string) (types.Instance, error) {
+	input := &ec2.DescribeInstancesInput{
+		InstanceIds: []string{instanceID},
+	}
+
+	result, err := s.client.DescribeInstances(ctx, input)
+	if err != nil {
+		return types.Instance{}, fmt.Errorf("describe instance: %w", err)
+	}
+
+	if len(result.Reservations) == 0 || len(result.Reservations[0].Instances) == 0 {
+		return types.Instance{}, fmt.Errorf("instance not found: %s", instanceID)
+	}
+
+	return result.Reservations[0].Instances[0], nil
+}
+
+func (s *Service) migrateInstanceToAMI(ctx context.Context, instance types.Instance, newAMI string) error {
+	instanceID := aws.ToString(instance.InstanceId)
+	
+	// Tag the instance to indicate migration is in progress
+	err := s.tagInstanceStatus(ctx, instance, "migrating", fmt.Sprintf("Migrating to AMI: %s", newAMI))
+	if err != nil {
+		return fmt.Errorf("tag instance status: %w", err)
+	}
+
+	// Stop the instance if it's running
+	if instance.State != nil && instance.State.Name == types.InstanceStateNameRunning {
 		if err := s.stopInstance(ctx, instance); err != nil {
-			s.tagInstanceStatus(ctx, instance, "failed", fmt.Sprintf("Failed to stop instance: %v", err))
 			return fmt.Errorf("stop instance: %w", err)
 		}
 	}
 
-	// Migrate the instance
+	// Perform the upgrade
 	if err := s.upgradeInstance(ctx, instance, newAMI); err != nil {
-		s.tagInstanceStatus(ctx, instance, "failed", fmt.Sprintf("Failed to upgrade instance: %v", err))
+		s.tagInstanceStatus(ctx, instance, "failed", fmt.Sprintf("Migration failed: %v", err))
 		return fmt.Errorf("upgrade instance: %w", err)
 	}
 
-	// If we stopped the instance, start it again
-	if needsStart {
-		if err := s.startInstance(ctx, instance); err != nil {
-			s.tagInstanceStatus(ctx, instance, "warning", fmt.Sprintf("Migration successful but failed to start instance: %v", err))
-			return nil
-		}
-	}
-
-	s.tagInstanceStatus(ctx, instance, "completed", "Migration completed successfully")
-	return nil
+	// Tag the instance as successfully migrated
+	return s.tagInstanceStatus(ctx, instance, "completed", fmt.Sprintf("Migrated to AMI: %s", newAMI))
 }
 
 func (s *Service) BackupInstance(ctx context.Context, instanceID string) error {
@@ -588,4 +690,157 @@ func (s *Service) BackupInstance(ctx context.Context, instanceID string) error {
 
 	s.tagInstanceStatus(ctx, instance, "completed", "Volume snapshots created successfully")
 	return nil
+}
+
+// CheckMigrationStatus checks if a user's instance needs migration
+func (s *Service) CheckMigrationStatus(ctx context.Context, userID string) (*MigrationStatus, error) {
+	// Find user's instance
+	input := &ec2.DescribeInstancesInput{
+		Filters: []types.Filter{
+			{
+				Name:   aws.String("tag:Owner"),
+				Values: []string{userID},
+			},
+		},
+	}
+
+	result, err := s.client.DescribeInstances(ctx, input)
+	if err != nil {
+		return nil, fmt.Errorf("describe instances: %w", err)
+	}
+
+	if len(result.Reservations) == 0 || len(result.Reservations[0].Instances) == 0 {
+		return nil, fmt.Errorf("no instance found for user: %s", userID)
+	}
+
+	instance := result.Reservations[0].Instances[0]
+	instanceID := aws.ToString(instance.InstanceId)
+
+	// Get instance OS type
+	osType, err := s.GetInstanceOSType(ctx, instanceID)
+	if err != nil {
+		return nil, fmt.Errorf("get OS type: %w", err)
+	}
+
+	// Get latest AMI for this OS
+	latestAMI, err := s.GetLatestAMI(ctx, osType)
+	if err != nil {
+		return nil, fmt.Errorf("get latest AMI: %w", err)
+	}
+
+	// Get latest AMI details
+	latestAMIDetails, err := s.getAMIDetails(ctx, latestAMI)
+	if err != nil {
+		return nil, fmt.Errorf("get AMI details: %w", err)
+	}
+
+	// Get current AMI details
+	currentAMI := aws.ToString(instance.ImageId)
+	currentAMIDetails, err := s.getAMIDetails(ctx, currentAMI)
+	if err != nil {
+		return nil, fmt.Errorf("get current AMI details: %w", err)
+	}
+
+	status := &MigrationStatus{
+		InstanceID:        instanceID,
+		OSType:           osType,
+		CurrentAMI:       currentAMI,
+		LatestAMI:        latestAMI,
+		NeedsMigration:   currentAMI != latestAMI,
+		CurrentAMIInfo:   currentAMIDetails,
+		LatestAMIInfo:    latestAMIDetails,
+		InstanceState:    string(instance.State.Name),
+		InstanceType:     aws.ToString(instance.InstanceType),
+		LaunchTime:       aws.ToTime(instance.LaunchTime),
+		PrivateIP:        aws.ToString(instance.PrivateIpAddress),
+		PublicIP:         aws.ToString(instance.PublicIpAddress),
+	}
+
+	return status, nil
+}
+
+// MigrationStatus contains information about an instance's migration status
+type MigrationStatus struct {
+	InstanceID      string
+	OSType          string
+	CurrentAMI      string
+	LatestAMI       string
+	NeedsMigration  bool
+	CurrentAMIInfo  *AMIDetails
+	LatestAMIInfo   *AMIDetails
+	InstanceState   string
+	InstanceType    string
+	LaunchTime      time.Time
+	PrivateIP       string
+	PublicIP        string
+}
+
+// AMIDetails contains information about an AMI
+type AMIDetails struct {
+	Name        string
+	Description string
+	CreatedDate string
+	Tags        map[string]string
+}
+
+func (s *Service) getAMIDetails(ctx context.Context, amiID string) (*AMIDetails, error) {
+	input := &ec2.DescribeImagesInput{
+		ImageIds: []string{amiID},
+	}
+
+	result, err := s.client.DescribeImages(ctx, input)
+	if err != nil {
+		return nil, fmt.Errorf("describe images: %w", err)
+	}
+
+	if len(result.Images) == 0 {
+		return nil, fmt.Errorf("AMI not found: %s", amiID)
+	}
+
+	image := result.Images[0]
+	tags := make(map[string]string)
+	for _, tag := range image.Tags {
+		tags[aws.ToString(tag.Key)] = aws.ToString(tag.Value)
+	}
+
+	return &AMIDetails{
+		Name:        aws.ToString(image.Name),
+		Description: aws.ToString(image.Description),
+		CreatedDate: aws.ToString(image.CreationDate),
+		Tags:        tags,
+	}, nil
+}
+
+// FormatMigrationStatus returns a human-readable string of the migration status
+func (s *MigrationStatus) FormatMigrationStatus() string {
+	var b strings.Builder
+
+	b.WriteString(fmt.Sprintf("Instance Status for %s:\n", s.InstanceID))
+	b.WriteString(fmt.Sprintf("  OS Type:        %s\n", s.OSType))
+	b.WriteString(fmt.Sprintf("  Instance Type:  %s\n", s.InstanceType))
+	b.WriteString(fmt.Sprintf("  State:          %s\n", s.InstanceState))
+	b.WriteString(fmt.Sprintf("  Launch Time:    %s\n", s.LaunchTime.Format(time.RFC3339)))
+	if s.PrivateIP != "" {
+		b.WriteString(fmt.Sprintf("  Private IP:     %s\n", s.PrivateIP))
+	}
+	if s.PublicIP != "" {
+		b.WriteString(fmt.Sprintf("  Public IP:      %s\n", s.PublicIP))
+	}
+	b.WriteString("\nAMI Status:\n")
+	b.WriteString(fmt.Sprintf("  Current AMI:    %s\n", s.CurrentAMI))
+	if s.CurrentAMIInfo != nil {
+		b.WriteString(fmt.Sprintf("    Name:         %s\n", s.CurrentAMIInfo.Name))
+		b.WriteString(fmt.Sprintf("    Created:      %s\n", s.CurrentAMIInfo.CreatedDate))
+	}
+	b.WriteString(fmt.Sprintf("  Latest AMI:     %s\n", s.LatestAMI))
+	if s.LatestAMIInfo != nil {
+		b.WriteString(fmt.Sprintf("    Name:         %s\n", s.LatestAMIInfo.Name))
+		b.WriteString(fmt.Sprintf("    Created:      %s\n", s.LatestAMIInfo.CreatedDate))
+	}
+	b.WriteString(fmt.Sprintf("\nMigration Needed: %v\n", s.NeedsMigration))
+	if s.NeedsMigration {
+		b.WriteString("\nRun 'ami-migrate migrate' to update your instance to the latest AMI.")
+	}
+
+	return b.String()
 }

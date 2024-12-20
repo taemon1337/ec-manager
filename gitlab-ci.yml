@@ -1,0 +1,53 @@
+variables:
+  GO_VERSION: "1.21"
+  AWS_DEFAULT_REGION: "${AWS_REGION}"
+
+# Daily AMI Migrations at 2 AM UTC
+.daily-schedule: &daily-schedule
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $CI_SCHEDULE == "daily-migrations"
+      when: always
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      when: manual
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      when: never
+
+stages:
+  - test
+  - migrate
+
+test:
+  stage: test
+  image: golang:${GO_VERSION}
+  script:
+    - go test -v ./...
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+
+migrate:
+  stage: migrate
+  image: golang:${GO_VERSION}
+  script:
+    - go build -o ami-migrate
+    - ./ami-migrate migrate
+  <<: *daily-schedule
+  variables:
+    AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+    AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+    AWS_REGION: ${AWS_REGION}
+
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+
+# Schedule configuration
+schedules:
+  - name: "daily-migrations"
+    cron: "0 2 * * *"
+    description: "Run AMI migrations daily at 2 AM UTC"
+    active: true
+    ref: main
