@@ -109,7 +109,33 @@ The migration process:
 5. Terminates old instance
 6. Starts new instance if original was running
 
-### 5. Delete Instances
+### 5. Login to AWS
+```bash
+# Login with default profile
+ecman login --role-arn arn:aws:iam::123456789012:role/MyRole
+
+# Login with MFA
+ecman login \
+  --role-arn arn:aws:iam::123456789012:role/MyRole \
+  --mfa-serial arn:aws:iam::123456789012:mfa/my-device \
+  --mfa-token 123456
+
+# Login with custom profile and session duration
+ecman login \
+  --role-arn arn:aws:iam::123456789012:role/MyRole \
+  --profile my-profile \
+  --duration 7200
+```
+
+Options:
+- `--role-arn`: (Required) ARN of the role to assume
+- `--profile`: AWS profile to store credentials (default: "default")
+- `--mfa-serial`: ARN of the MFA device (if MFA is required)
+- `--mfa-token`: MFA token code (if MFA is required)
+- `--duration`: Session duration in seconds (default: 3600)
+- `--session-name`: Name for the role session (default: "ec-manager-session")
+
+### 6. Delete Instances
 ```bash
 # Delete using AWS credentials username
 ecman delete --instance i-1234567890abcdef0

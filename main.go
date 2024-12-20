@@ -22,6 +22,7 @@ Actions:
   list        List your EC2 instances
   check       Check instance status
   delete      Delete an EC2 instance
+  login       Login to AWS
   help        Show this help message
 
 Options:
@@ -223,12 +224,24 @@ func main() {
 		},
 	}
 
-	rootCmd.AddCommand(migrateCmd)
-	rootCmd.AddCommand(backupCmd)
-	rootCmd.AddCommand(restoreCmd)
-	rootCmd.AddCommand(listCmd)
-	rootCmd.AddCommand(checkCmd)
-	rootCmd.AddCommand(deleteCmd)
+	loginCmd := &cobra.Command{
+		Use:   "login",
+		Short: "Login to AWS",
+		Run: func(cmd *cobra.Command, args []string) {
+			fmt.Println("Logging in to AWS...")
+			// TODO: Implement login functionality
+		},
+	}
+
+	rootCmd.AddCommand(
+		migrateCmd,
+		backupCmd,
+		restoreCmd,
+		listCmd,
+		checkCmd,
+		deleteCmd,
+		loginCmd,
+	)
 
 	migrateCmd.Flags().StringP("enabled-value", "e", "enabled", "Value to match for the ami-migrate tag")
 	migrateCmd.Flags().StringP("new-ami", "n", "", "ID of the new AMI to migrate to")
