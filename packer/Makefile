@@ -1,6 +1,6 @@
 .PHONY: all rhel9 ubuntu docker-build init validate
 
-DOCKER_IMAGE := ami-migrate-packer:latest
+DOCKER_IMAGE := ec-manager-packer:latest
 AWS_REGION ?= us-east-1
 
 all: docker-build rhel9 ubuntu

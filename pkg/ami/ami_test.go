@@ -9,10 +9,10 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/stretchr/testify/assert"
-	"github.com/taemon1337/ami-migrate/pkg/client"
-	"github.com/taemon1337/ami-migrate/pkg/logger"
-	"github.com/taemon1337/ami-migrate/pkg/testutil"
-	apitypes "github.com/taemon1337/ami-migrate/pkg/types"
+	"github.com/taemon1337/ec-manager/pkg/client"
+	"github.com/taemon1337/ec-manager/pkg/logger"
+	"github.com/taemon1337/ec-manager/pkg/testutil"
+	apitypes "github.com/taemon1337/ec-manager/pkg/types"
 )
 
 func TestGetAMIWithTag(t *testing.T) {

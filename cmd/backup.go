@@ -1,13 +1,12 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 
 	"github.com/spf13/cobra"
-	"github.com/taemon1337/ami-migrate/pkg/ami"
-	"github.com/taemon1337/ami-migrate/pkg/client"
-	"github.com/taemon1337/ami-migrate/pkg/logger"
+	"github.com/taemon1337/ec-manager/pkg/ami"
+	"github.com/taemon1337/ec-manager/pkg/client"
+	"github.com/taemon1337/ec-manager/pkg/logger"
 )
 
 // backupCmd represents the backup command
@@ -36,7 +35,10 @@ by using the --enabled flag.`,
 		enabled, _ := cmd.Flags().GetBool("enabled")
 
 		// Create AWS clients
-		ec2Client := client.GetEC2Client()
+		ec2Client, err := client.GetEC2Client(cmd.Context())
+		if err != nil {
+			return fmt.Errorf("failed to get EC2 client: %w", err)
+		}
 
 		// Create AMI service
 		svc := ami.NewService(ec2Client)
@@ -47,7 +49,7 @@ by using the --enabled flag.`,
 			instances = []string{instanceID}
 		} else if enabled {
 			// Get all instances with ami-migrate=enabled tag
-			taggedInstances, err := svc.ListUserInstances(context.Background(), "ami-migrate")
+			taggedInstances, err := svc.ListUserInstances(cmd.Context(), "ami-migrate")
 			if err != nil {
 				return fmt.Errorf("failed to list instances: %v", err)
 			}
@@ -63,7 +65,7 @@ by using the --enabled flag.`,
 		// Backup each instance
 		for _, instance := range instances {
 			logger.Info(fmt.Sprintf("Creating backup AMI for instance %s", instance))
-			if err := svc.BackupInstance(context.Background(), instance); err != nil {
+			if err := svc.BackupInstance(cmd.Context(), instance); err != nil {
 				return fmt.Errorf("failed to backup instance %s: %v", instance, err)
 			}
 			logger.Info(fmt.Sprintf("Successfully created backup for instance %s", instance))

@@ -8,13 +8,13 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
-	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
-	"github.com/taemon1337/ami-migrate/pkg/ami"
-	"github.com/taemon1337/ami-migrate/pkg/client"
-	"github.com/taemon1337/ami-migrate/pkg/logger"
-	"github.com/taemon1337/ami-migrate/pkg/testutil"
-	apitypes "github.com/taemon1337/ami-migrate/pkg/types"
+	"github.com/taemon1337/ec-manager/pkg/ami"
+	"github.com/taemon1337/ec-manager/pkg/client"
+	"github.com/taemon1337/ec-manager/pkg/logger"
+	"github.com/taemon1337/ec-manager/pkg/testutil"
+	apitypes "github.com/taemon1337/ec-manager/pkg/types"
+	"github.com/spf13/cobra"
 )
 
 func TestBackupCmd(t *testing.T) {
@@ -190,8 +190,14 @@ func TestBackupCmd(t *testing.T) {
 				instanceID, _ := cmd.Flags().GetString("instance-id")
 				enabled, _ := cmd.Flags().GetBool("enabled")
 
+				// Create EC2 client
+				ec2Client, err := client.GetEC2Client(cmd.Context())
+				if err != nil {
+					return fmt.Errorf("failed to get EC2 client: %w", err)
+				}
+
 				// Create AMI service
-				svc := ami.NewService(client.GetEC2Client())
+				svc := ami.NewService(ec2Client)
 
 				// Get instances to backup
 				var instances []string

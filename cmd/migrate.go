@@ -5,9 +5,9 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
-	"github.com/taemon1337/ami-migrate/pkg/ami"
-	"github.com/taemon1337/ami-migrate/pkg/client"
-	"github.com/taemon1337/ami-migrate/pkg/logger"
+	"github.com/taemon1337/ec-manager/pkg/ami"
+	"github.com/taemon1337/ec-manager/pkg/client"
+	"github.com/taemon1337/ec-manager/pkg/logger"
 )
 
 // migrateCmd represents the migrate command
@@ -42,7 +42,14 @@ by using the --enabled flag. The --new-ami flag is required to specify the targe
 		newAMI, _ := cmd.Flags().GetString("new-ami")
 
 		// Create AWS clients
-		ec2Client := client.GetEC2Client()
+		ctx := cmd.Context()
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		ec2Client, err := client.GetEC2Client(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to get EC2 client: %w", err)
+		}
 
 		// Create AMI service
 		svc := ami.NewService(ec2Client)
@@ -53,7 +60,7 @@ by using the --enabled flag. The --new-ami flag is required to specify the targe
 			instances = []string{instanceID}
 		} else if enabled {
 			// Get all instances with ami-migrate=enabled tag
-			taggedInstances, err := svc.ListUserInstances(context.Background(), "ami-migrate")
+			taggedInstances, err := svc.ListUserInstances(ctx, "ami-migrate")
 			if err != nil {
 				return fmt.Errorf("failed to list instances: %v", err)
 			}
@@ -68,7 +75,7 @@ by using the --enabled flag. The --new-ami flag is required to specify the targe
 
 		// Migrate each instance
 		for _, instance := range instances {
-			if err := svc.MigrateInstance(context.Background(), instance, newAMI); err != nil {
+			if err := svc.MigrateInstance(ctx, instance, newAMI); err != nil {
 				return fmt.Errorf("failed to migrate instance %s: %v", instance, err)
 			}
 			logger.Info("Successfully migrated instance", "instanceID", instance)

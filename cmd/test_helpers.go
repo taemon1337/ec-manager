@@ -4,9 +4,9 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/taemon1337/ami-migrate/pkg/client"
-	"github.com/taemon1337/ami-migrate/pkg/config"
-	apitypes "github.com/taemon1337/ami-migrate/pkg/types"
+	"github.com/taemon1337/ec-manager/pkg/client"
+	"github.com/taemon1337/ec-manager/pkg/config"
+	apitypes "github.com/taemon1337/ec-manager/pkg/types"
 )
 
 // setupTest creates a new mock client and command for testing

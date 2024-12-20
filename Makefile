@@ -1,6 +1,6 @@
 # Variables
-BINARY_NAME=ami-migrate
-DOCKER_IMAGE=ami-migrate
+BINARY_NAME=ecman
+DOCKER_IMAGE=ec-manager
 GO_VERSION=1.21
 GOCACHE=${HOME}/.cache/go-build
 GOLANGCI=${HOME}/.cache/golangci-lint

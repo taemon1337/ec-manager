@@ -10,10 +10,10 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
-	"github.com/taemon1337/ami-migrate/pkg/client"
-	"github.com/taemon1337/ami-migrate/pkg/config"
-	"github.com/taemon1337/ami-migrate/pkg/logger"
-	apitypes "github.com/taemon1337/ami-migrate/pkg/types"
+	"github.com/taemon1337/ec-manager/pkg/client"
+	"github.com/taemon1337/ec-manager/pkg/config"
+	"github.com/taemon1337/ec-manager/pkg/logger"
+	apitypes "github.com/taemon1337/ec-manager/pkg/types"
 )
 
 // EC2ClientAPI defines the AWS EC2 client interface
@@ -413,8 +413,14 @@ func (s *Service) RestoreInstance(ctx context.Context, instanceID, snapshotID st
 		return fmt.Errorf("failed to create volume: %w", err)
 	}
 
+	// Get EC2 client for waiter
+	ec2Client, err := client.GetEC2Client(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get EC2 client for waiter: %w", err)
+	}
+
 	// Wait for volume to be available
-	waiter := ec2.NewVolumeAvailableWaiter(client.GetEC2Client())
+	waiter := ec2.NewVolumeAvailableWaiter(ec2Client)
 	if err := waiter.Wait(ctx, &ec2.DescribeVolumesInput{
 		VolumeIds: []string{aws.ToString(volume.VolumeId)},
 	}, config.GetTimeout()); err != nil {
@@ -430,8 +436,14 @@ func (s *Service) RestoreInstance(ctx context.Context, instanceID, snapshotID st
 			return fmt.Errorf("failed to stop instance: %w", err)
 		}
 
+		// Get EC2 client for waiter
+		ec2Client, err := client.GetEC2Client(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to get EC2 client for waiter: %w", err)
+		}
+
 		// Wait for instance to stop
-		stopWaiter := ec2.NewInstanceStoppedWaiter(client.GetEC2Client())
+		stopWaiter := ec2.NewInstanceStoppedWaiter(ec2Client)
 		if err := stopWaiter.Wait(ctx, &ec2.DescribeInstancesInput{
 			InstanceIds: []string{instanceID},
 		}, config.GetTimeout()); err != nil {
@@ -1115,14 +1127,19 @@ func (w *terminatedWaiter) Wait(ctx context.Context, params *ec2.DescribeInstanc
 }
 
 func waitForInstanceState(ctx context.Context, instanceID string, desiredState types.InstanceStateName) error {
+	ec2Client, err := client.GetEC2Client(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get EC2 client: %w", err)
+	}
+
 	var waiter waiterInterface
 	switch desiredState {
 	case types.InstanceStateNameRunning:
-		waiter = &runningWaiter{ec2.NewInstanceRunningWaiter(client.GetEC2Client())}
+		waiter = &runningWaiter{ec2.NewInstanceRunningWaiter(ec2Client)}
 	case types.InstanceStateNameStopped:
-		waiter = &stoppedWaiter{ec2.NewInstanceStoppedWaiter(client.GetEC2Client())}
+		waiter = &stoppedWaiter{ec2.NewInstanceStoppedWaiter(ec2Client)}
 	case types.InstanceStateNameTerminated:
-		waiter = &terminatedWaiter{ec2.NewInstanceTerminatedWaiter(client.GetEC2Client())}
+		waiter = &terminatedWaiter{ec2.NewInstanceTerminatedWaiter(ec2Client)}
 	default:
 		return fmt.Errorf("unsupported instance state: %s", desiredState)
 	}

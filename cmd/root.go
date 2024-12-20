@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/taemon1337/ami-migrate/pkg/config"
-	"github.com/taemon1337/ami-migrate/pkg/logger"
+	"github.com/taemon1337/ec-manager/pkg/config"
+	"github.com/taemon1337/ec-manager/pkg/logger"
 )
 
 var (
@@ -23,11 +23,15 @@ var (
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
-	Use:   "ami-migrate",
-	Short: "A tool for migrating AWS EC2 instances to new AMIs",
-	Long: `ami-migrate is a CLI tool that helps you migrate your AWS EC2 instances
-to new AMIs. It can backup your instances, create new AMIs, and migrate
-your instances to the new AMIs.`,
+	Use:   "ecman",
+	Short: "EC2 instance management tool",
+	Long: `ec-manager (ecman) is a CLI tool that helps you manage your AWS EC2 instances.
+It provides commands for:
+- Creating new instances with proper configuration
+- Listing and checking instance status
+- Migrating instances to new AMIs
+- Managing instance backups
+- Cleaning up unused instances`,
 }
 
 // Execute adds all child commands to the root command and sets flags appropriately.
@@ -71,7 +75,6 @@ func getUserID(cmd *cobra.Command) (string, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-
 	awsUser, err := config.GetAWSUsername(ctx)
 	if err != nil {
 		return "", fmt.Errorf("failed to get AWS username: %v", err)

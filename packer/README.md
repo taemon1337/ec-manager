@@ -61,7 +61,7 @@ Override variables using the -var flag:
 docker run --rm -it \
   -v $(PWD):/workspace \
   -v ~/.aws:/root/.aws:ro \
-  ami-migrate-packer:latest \
+  ec-manager-packer:latest \
   build -var="aws_region=us-west-2" rhel9/rhel9.pkr.hcl
 ```
 
@@ -74,7 +74,7 @@ docker run --rm -it \
   -v ~/.aws:/root/.aws:ro \
   -e RHSM_USER=your-username \
   -e RHSM_PASS=your-password \
-  ami-migrate-packer:latest \
+  ec-manager-packer:latest \
   build rhel9/rhel9.pkr.hcl
 ```
 
@@ -116,6 +116,6 @@ After a successful build:
 
 2. A manifest.json file is created in the build directory with AMI details
 
-## Integration with ami-migrate
+## Integration with ec-manager
 
-The AMIs built with these configurations are compatible with the ami-migrate tool. They are automatically tagged with "Status=latest" which allows ami-migrate to track and manage AMI versions.
+The AMIs built with these configurations are compatible with the ec-manager tool. They are automatically tagged with "Status=latest" which allows ec-manager to track and manage AMI versions.

@@ -1,26 +1,39 @@
-# AMI Migration Tool
+# EC2 Manager (ecman)
 
-A Go-based tool for managing AWS AMI migrations. This tool helps automate the process of updating EC2 instances to use a new AMI while maintaining proper versioning and backups.
+A comprehensive CLI tool for managing AWS EC2 instances. This tool helps automate common EC2 management tasks including instance creation, AMI migrations, backups, and lifecycle management.
 
 ## Quick Start
 
 1. Install the tool:
 ```bash
-docker pull ami-migrate:latest
+docker pull ec-manager:latest
 ```
 
-2. Run your first migration:
+2. Run your first command:
 ```bash
+# List your instances
 docker run --rm \
   -v ~/.aws:/root/.aws:ro \
-  ami-migrate:latest \
-  migrate \
-  --new-ami ami-xxxxx
+  ec-manager:latest \
+  list
+
+# Create a new instance
+docker run --rm \
+  -v ~/.aws:/root/.aws:ro \
+  ec-manager:latest \
+  create --os RHEL9 --size xlarge
+
+# Migrate an instance to a new AMI
+docker run --rm \
+  -v ~/.aws:/root/.aws:ro \
+  ec-manager:latest \
+  migrate --new-ami ami-xxxxx
 ```
 
 ## Core Features
 
-- Automatic AMI version tracking and management
+- Complete EC2 instance lifecycle management
+- Automatic AMI version tracking and migration
 - Safe instance migration with volume snapshots
 - Selective migration based on instance state and tags
 - Comprehensive status tracking and error handling
@@ -31,10 +44,10 @@ docker run --rm \
 ### 1. List Your Instances
 ```bash
 # Uses your AWS credentials username
-ami-migrate list
+ecman list
 
 # Or specify a different username
-ami-migrate list --user johndoe
+ecman list --user johndoe
 ```
 
 Output shows:
@@ -48,10 +61,10 @@ Output shows:
 ### 2. Check Migration Status
 ```bash
 # Uses your AWS credentials username
-ami-migrate check
+ecman check
 
 # Or specify a different username
-ami-migrate check --user johndoe
+ecman check --user johndoe
 ```
 
 Shows for each instance:
@@ -62,10 +75,10 @@ Shows for each instance:
 ### 3. Create New Instance
 ```bash
 # Create default Ubuntu instance
-ami-migrate create
+ecman create
 
 # Create custom RHEL instance
-ami-migrate create \
+ecman create \
   --os RHEL9 \
   --size xlarge \
   --name my-instance
@@ -80,10 +93,10 @@ Options:
 ### 4. Migrate Instances
 ```bash
 # Migrate by tag
-ami-migrate migrate --new-ami ami-xxxxx
+ecman migrate --new-ami ami-xxxxx
 
 # Migrate specific instance
-ami-migrate migrate \
+ecman migrate \
   --new-ami ami-xxxxx \
   --instance-id i-xxxxx
 ```
@@ -99,10 +112,10 @@ The migration process:
 ### 5. Delete Instances
 ```bash
 # Delete using AWS credentials username
-ami-migrate delete --instance i-1234567890abcdef0
+ecman delete --instance i-1234567890abcdef0
 
 # Or specify a different username
-ami-migrate delete \
+ecman delete \
   --user johndoe \
   --instance i-1234567890abcdef0
 ```
@@ -115,7 +128,7 @@ Safely deletes with:
 
 ## Instance Tags
 
-Control migration behavior with these tags:
+Control instance behavior with these tags:
 
 1. Main Migration Tag (Required):
 ```
@@ -177,7 +190,7 @@ make docker-build
 
 ### Project Structure
 ```
-ami-migrate/
+ec-manager/
 ├── cmd/               # CLI commands
 │   ├── backup.go     
 │   ├── check.go      
@@ -216,37 +229,28 @@ This means you can run most commands without explicitly specifying your username
 
 ```bash
 # List your instances
-ami-migrate list
+ecman list
 
 # Check migration status
-ami-migrate check
+ecman check
 
 # Create a new instance
-ami-migrate create --os RHEL9
+ecman create --os RHEL9
 
 # Delete an instance
-ami-migrate delete --instance i-xxxxx
+ecman delete --instance i-xxxxx
 ```
 
 ## CI/CD Integration
 
-For GitLab CI, add this to your `.gitlab-ci.yml`:
-
-```yaml
-ami-migrate:
-  image: golang:1.21-alpine
-  script:
-    - go install github.com/taemon1337/ami-migrate@latest
-    - ami-migrate migrate --new-ami $NEW_AMI_ID
-  rules:
-    - if: $CI_COMMIT_TAG  # Only run on tags
+For CI/CD pipelines, you can use environment variables for AWS credentials:
+```bash
+docker run --rm \
+  -e AWS_ACCESS_KEY_ID \
+  -e AWS_SECRET_ACCESS_KEY \
+  -e AWS_DEFAULT_REGION \
+  ec-manager:latest list
 ```
-
-Make sure to set these environment variables in GitLab:
-- `AWS_ACCESS_KEY_ID`
-- `AWS_SECRET_ACCESS_KEY`
-- `AWS_REGION`
-- `NEW_AMI_ID`
 
 ## AWS Configuration
 
@@ -255,7 +259,7 @@ When running the containerized version, mount your AWS credentials:
 ```bash
 docker run --rm \
   -v ~/.aws:/root/.aws:ro \
-  ami-migrate:latest \
+  ec-manager:latest \
   migrate \
   --new-ami ami-xxxxx
 ```
