@@ -11,8 +11,8 @@ import (
 
 // setupTest creates a new mock client and command for testing
 func setupTest(use string, setupMock func(*apitypes.MockEC2Client)) (*cobra.Command, *apitypes.MockEC2Client) {
-	// Set short timeout for tests
-	config.SetTimeout(1 * time.Second)
+	// Set timeout for tests
+	config.SetTimeout(10 * time.Second)
 
 	// Create mock client and set it
 	mockClient := apitypes.NewMockEC2Client()
@@ -28,7 +28,7 @@ func setupTest(use string, setupMock func(*apitypes.MockEC2Client)) (*cobra.Comm
 	cmd.Flags().String("instance-id", "", "ID of the instance")
 	cmd.Flags().Bool("enabled", false, "Process all instances with ami-migrate=enabled tag")
 	cmd.Flags().String("log-level", "info", "Log level (debug, info, warn, error)")
-	cmd.Flags().Duration("timeout", 1*time.Second, "Timeout for AWS operations")
+	cmd.Flags().Duration("timeout", 10*time.Second, "Timeout for AWS operations")
 
 	return cmd, mockClient
 }

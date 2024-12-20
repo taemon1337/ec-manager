@@ -46,13 +46,13 @@ type MockEC2Client struct {
 	Volumes   []types.Volume
 
 	// Track instance states for waiters
-	instanceStates map[string]types.InstanceStateName
+	InstanceStates map[string]types.InstanceStateName
 }
 
 // NewMockEC2Client creates a new mock EC2 client
 func NewMockEC2Client() *MockEC2Client {
 	return &MockEC2Client{
-		instanceStates: make(map[string]types.InstanceStateName),
+		InstanceStates: make(map[string]types.InstanceStateName),
 	}
 }
 
@@ -64,36 +64,44 @@ func (m *MockEC2Client) DescribeInstances(ctx context.Context, params *ec2.Descr
 	if m.DescribeInstancesError != nil {
 		return nil, m.DescribeInstancesError
 	}
+
 	if m.DescribeInstancesOutput != nil {
+		// Update the instance states in the output based on our tracked states
+		for i, reservation := range m.DescribeInstancesOutput.Reservations {
+			for j, instance := range reservation.Instances {
+				if instance.InstanceId != nil {
+					if state, exists := m.InstanceStates[*instance.InstanceId]; exists {
+						m.DescribeInstancesOutput.Reservations[i].Instances[j].State = &types.InstanceState{
+							Name: state,
+						}
+					}
+				}
+			}
+		}
 		return m.DescribeInstancesOutput, nil
 	}
 
-	// If we're looking for specific instances (waiter case)
-	if len(params.InstanceIds) > 0 {
-		instances := make([]types.Instance, 0, len(params.InstanceIds))
+	// Default behavior
+	instances := make([]types.Instance, 0)
+	if params.InstanceIds != nil {
 		for _, id := range params.InstanceIds {
-			if state, exists := m.instanceStates[id]; exists {
-				instances = append(instances, types.Instance{
-					InstanceId: aws.String(id),
-					State: &types.InstanceState{
-						Name: state,
-					},
-				})
+			state := types.InstanceStateNameRunning
+			if s, exists := m.InstanceStates[id]; exists {
+				state = s
 			}
-		}
-		return &ec2.DescribeInstancesOutput{
-			Reservations: []types.Reservation{
-				{
-					Instances: instances,
+			instances = append(instances, types.Instance{
+				InstanceId: aws.String(id),
+				State: &types.InstanceState{
+					Name: state,
 				},
-			},
-		}, nil
+			})
+		}
 	}
 
 	return &ec2.DescribeInstancesOutput{
 		Reservations: []types.Reservation{
 			{
-				Instances: m.Instances,
+				Instances: instances,
 			},
 		},
 	}, nil
@@ -101,30 +109,57 @@ func (m *MockEC2Client) DescribeInstances(ctx context.Context, params *ec2.Descr
 
 // DescribeImages implements EC2ClientAPI
 func (m *MockEC2Client) DescribeImages(ctx context.Context, params *ec2.DescribeImagesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeImagesOutput, error) {
+	m.Lock()
+	defer m.Unlock()
+
 	if m.DescribeImagesError != nil {
 		return nil, m.DescribeImagesError
 	}
 	if m.DescribeImagesOutput != nil {
 		return m.DescribeImagesOutput, nil
 	}
-	// Use the data fields if output is not set
-	if len(m.Images) > 0 {
-		return &ec2.DescribeImagesOutput{
-			Images: m.Images,
-		}, nil
-	}
-	return &ec2.DescribeImagesOutput{}, nil
+
+	return &ec2.DescribeImagesOutput{
+		Images: m.Images,
+	}, nil
 }
 
-// RunInstances implements EC2ClientAPI
+// RunInstances mocks the RunInstances operation
 func (m *MockEC2Client) RunInstances(ctx context.Context, params *ec2.RunInstancesInput, optFns ...func(*ec2.Options)) (*ec2.RunInstancesOutput, error) {
+	m.Lock()
+	defer m.Unlock()
+
 	if m.RunInstancesError != nil {
 		return nil, m.RunInstancesError
 	}
-	return m.RunInstancesOutput, nil
+
+	if m.RunInstancesOutput != nil {
+		// Update instance state to running for all instances
+		for _, instance := range m.RunInstancesOutput.Instances {
+			if instance.InstanceId != nil {
+				m.setInstanceStateWithLock(*instance.InstanceId, types.InstanceStateNameRunning)
+			}
+		}
+		return m.RunInstancesOutput, nil
+	}
+
+	// Default behavior
+	instanceID := "i-456"
+	m.setInstanceStateWithLock(instanceID, types.InstanceStateNameRunning)
+	return &ec2.RunInstancesOutput{
+		Instances: []types.Instance{
+			{
+				InstanceId: aws.String(instanceID),
+				ImageId:    params.ImageId,
+				State: &types.InstanceState{
+					Name: types.InstanceStateNameRunning,
+				},
+			},
+		},
+	}, nil
 }
 
-// StopInstances implements EC2ClientAPI
+// StopInstances mocks the StopInstances operation
 func (m *MockEC2Client) StopInstances(ctx context.Context, params *ec2.StopInstancesInput, optFns ...func(*ec2.Options)) (*ec2.StopInstancesOutput, error) {
 	m.Lock()
 	defer m.Unlock()
@@ -132,24 +167,32 @@ func (m *MockEC2Client) StopInstances(ctx context.Context, params *ec2.StopInsta
 	if m.StopInstancesError != nil {
 		return nil, m.StopInstancesError
 	}
+
 	if m.StopInstancesOutput != nil {
+		// Update instance state to stopped
+		for _, instanceID := range params.InstanceIds {
+			m.setInstanceStateWithLock(instanceID, types.InstanceStateNameStopped)
+		}
 		return m.StopInstancesOutput, nil
 	}
 
-	// Update instance state in the mock data
-	if len(params.InstanceIds) > 0 {
-		m.setInstanceStateWithLock(params.InstanceIds[0], types.InstanceStateNameStopped)
+	// Default behavior if no output is set
+	stoppingInstances := make([]types.InstanceStateChange, 0, len(params.InstanceIds))
+	for _, instanceID := range params.InstanceIds {
+		m.setInstanceStateWithLock(instanceID, types.InstanceStateNameStopped)
+		stoppingInstances = append(stoppingInstances, types.InstanceStateChange{
+			CurrentState: &types.InstanceState{
+				Name: types.InstanceStateNameStopped,
+			},
+			InstanceId: aws.String(instanceID),
+			PreviousState: &types.InstanceState{
+				Name: types.InstanceStateNameRunning,
+			},
+		})
 	}
 
 	return &ec2.StopInstancesOutput{
-		StoppingInstances: []types.InstanceStateChange{
-			{
-				CurrentState: &types.InstanceState{
-					Name: types.InstanceStateNameStopped,
-				},
-				InstanceId: aws.String(params.InstanceIds[0]),
-			},
-		},
+		StoppingInstances: stoppingInstances,
 	}, nil
 }
 
@@ -161,36 +204,47 @@ func (m *MockEC2Client) StartInstances(ctx context.Context, params *ec2.StartIns
 	if m.StartInstancesError != nil {
 		return nil, m.StartInstancesError
 	}
+
+	// Update instance states
+	for _, id := range params.InstanceIds {
+		m.setInstanceStateWithLock(id, types.InstanceStateNameRunning)
+	}
+
 	if m.StartInstancesOutput != nil {
 		return m.StartInstancesOutput, nil
 	}
 
-	// Update instance state in the mock data
-	if len(params.InstanceIds) > 0 {
-		m.setInstanceStateWithLock(params.InstanceIds[0], types.InstanceStateNameRunning)
+	// Create default response
+	startingInstances := make([]types.InstanceStateChange, 0, len(params.InstanceIds))
+	for _, id := range params.InstanceIds {
+		startingInstances = append(startingInstances, types.InstanceStateChange{
+			CurrentState: &types.InstanceState{
+				Name: types.InstanceStateNameRunning,
+			},
+			InstanceId: aws.String(id),
+			PreviousState: &types.InstanceState{
+				Name: types.InstanceStateNameStopped,
+			},
+		})
 	}
 
 	return &ec2.StartInstancesOutput{
-		StartingInstances: []types.InstanceStateChange{
-			{
-				CurrentState: &types.InstanceState{
-					Name: types.InstanceStateNameRunning,
-				},
-				InstanceId: aws.String(params.InstanceIds[0]),
-			},
-		},
+		StartingInstances: startingInstances,
 	}, nil
 }
 
 // CreateTags implements EC2ClientAPI
 func (m *MockEC2Client) CreateTags(ctx context.Context, params *ec2.CreateTagsInput, optFns ...func(*ec2.Options)) (*ec2.CreateTagsOutput, error) {
+	m.Lock()
+	defer m.Unlock()
+
 	if m.CreateTagsError != nil {
 		return nil, m.CreateTagsError
 	}
 	return m.CreateTagsOutput, nil
 }
 
-// TerminateInstances implements EC2ClientAPI
+// TerminateInstances mocks the TerminateInstances operation
 func (m *MockEC2Client) TerminateInstances(ctx context.Context, params *ec2.TerminateInstancesInput, optFns ...func(*ec2.Options)) (*ec2.TerminateInstancesOutput, error) {
 	m.Lock()
 	defer m.Unlock()
@@ -198,29 +252,40 @@ func (m *MockEC2Client) TerminateInstances(ctx context.Context, params *ec2.Term
 	if m.TerminateInstancesError != nil {
 		return nil, m.TerminateInstancesError
 	}
+
 	if m.TerminateInstancesOutput != nil {
+		// Update instance state to terminated
+		for _, instanceID := range params.InstanceIds {
+			m.setInstanceStateWithLock(instanceID, types.InstanceStateNameTerminated)
+		}
 		return m.TerminateInstancesOutput, nil
 	}
 
-	// Update instance state in the mock data
-	if len(params.InstanceIds) > 0 {
-		m.setInstanceStateWithLock(params.InstanceIds[0], types.InstanceStateNameTerminated)
+	// Default behavior
+	terminatingInstances := make([]types.InstanceStateChange, 0, len(params.InstanceIds))
+	for _, instanceID := range params.InstanceIds {
+		m.setInstanceStateWithLock(instanceID, types.InstanceStateNameTerminated)
+		terminatingInstances = append(terminatingInstances, types.InstanceStateChange{
+			CurrentState: &types.InstanceState{
+				Name: types.InstanceStateNameTerminated,
+			},
+			InstanceId: aws.String(instanceID),
+			PreviousState: &types.InstanceState{
+				Name: types.InstanceStateNameRunning,
+			},
+		})
 	}
 
 	return &ec2.TerminateInstancesOutput{
-		TerminatingInstances: []types.InstanceStateChange{
-			{
-				CurrentState: &types.InstanceState{
-					Name: types.InstanceStateNameTerminated,
-				},
-				InstanceId: aws.String(params.InstanceIds[0]),
-			},
-		},
+		TerminatingInstances: terminatingInstances,
 	}, nil
 }
 
 // CreateSnapshot implements EC2ClientAPI
 func (m *MockEC2Client) CreateSnapshot(ctx context.Context, params *ec2.CreateSnapshotInput, optFns ...func(*ec2.Options)) (*ec2.CreateSnapshotOutput, error) {
+	m.Lock()
+	defer m.Unlock()
+
 	if m.CreateSnapshotError != nil {
 		return nil, m.CreateSnapshotError
 	}
@@ -229,23 +294,26 @@ func (m *MockEC2Client) CreateSnapshot(ctx context.Context, params *ec2.CreateSn
 
 // DescribeSnapshots implements EC2ClientAPI
 func (m *MockEC2Client) DescribeSnapshots(ctx context.Context, params *ec2.DescribeSnapshotsInput, optFns ...func(*ec2.Options)) (*ec2.DescribeSnapshotsOutput, error) {
+	m.Lock()
+	defer m.Unlock()
+
 	if m.DescribeSnapshotsError != nil {
 		return nil, m.DescribeSnapshotsError
 	}
 	if m.DescribeSnapshotsOutput != nil {
 		return m.DescribeSnapshotsOutput, nil
 	}
-	// Use the data fields if output is not set
-	if len(m.Snapshots) > 0 {
-		return &ec2.DescribeSnapshotsOutput{
-			Snapshots: m.Snapshots,
-		}, nil
-	}
-	return &ec2.DescribeSnapshotsOutput{}, nil
+
+	return &ec2.DescribeSnapshotsOutput{
+		Snapshots: m.Snapshots,
+	}, nil
 }
 
 // CreateVolume implements EC2ClientAPI
 func (m *MockEC2Client) CreateVolume(ctx context.Context, params *ec2.CreateVolumeInput, optFns ...func(*ec2.Options)) (*ec2.CreateVolumeOutput, error) {
+	m.Lock()
+	defer m.Unlock()
+
 	if m.CreateVolumeError != nil {
 		return nil, m.CreateVolumeError
 	}
@@ -254,31 +322,48 @@ func (m *MockEC2Client) CreateVolume(ctx context.Context, params *ec2.CreateVolu
 
 // DescribeVolumes implements EC2ClientAPI
 func (m *MockEC2Client) DescribeVolumes(ctx context.Context, params *ec2.DescribeVolumesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeVolumesOutput, error) {
+	m.Lock()
+	defer m.Unlock()
+
 	if m.DescribeVolumesError != nil {
 		return nil, m.DescribeVolumesError
 	}
 	if m.DescribeVolumesOutput != nil {
 		return m.DescribeVolumesOutput, nil
 	}
-	// Use the data fields if output is not set
-	if len(m.Volumes) > 0 {
-		return &ec2.DescribeVolumesOutput{
-			Volumes: m.Volumes,
-		}, nil
-	}
-	return &ec2.DescribeVolumesOutput{}, nil
+
+	return &ec2.DescribeVolumesOutput{
+		Volumes: m.Volumes,
+	}, nil
 }
 
 // AttachVolume implements EC2ClientAPI
 func (m *MockEC2Client) AttachVolume(ctx context.Context, params *ec2.AttachVolumeInput, optFns ...func(*ec2.Options)) (*ec2.AttachVolumeOutput, error) {
+	m.Lock()
+	defer m.Unlock()
+
 	if m.AttachVolumeError != nil {
 		return nil, m.AttachVolumeError
 	}
 	return m.AttachVolumeOutput, nil
 }
 
+// GetInstanceState returns the current state of an instance
+func (m *MockEC2Client) GetInstanceState(instanceID string) types.InstanceStateName {
+	m.Lock()
+	defer m.Unlock()
+	
+	if state, exists := m.InstanceStates[instanceID]; exists {
+		return state
+	}
+	return types.InstanceStateNamePending // Default state if not found
+}
+
 // setInstanceStateWithLock sets the state of an instance in both the main instance list and the waiter state map
 func (m *MockEC2Client) setInstanceStateWithLock(instanceID string, state types.InstanceStateName) {
+	// Update instance state map
+	m.InstanceStates[instanceID] = state
+
 	// Update instance in the main list
 	for i, instance := range m.Instances {
 		if aws.ToString(instance.InstanceId) == instanceID {
@@ -288,9 +373,6 @@ func (m *MockEC2Client) setInstanceStateWithLock(instanceID string, state types.
 			break
 		}
 	}
-
-	// Update state for waiters
-	m.instanceStates[instanceID] = state
 }
 
 // SetInstanceState sets the state of an instance in both the main instance list and the waiter state map

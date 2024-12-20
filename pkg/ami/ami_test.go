@@ -27,7 +27,7 @@ func TestGetAMIWithTag(t *testing.T) {
 
 	tests := []struct {
 		name        string
-		mockClient  *apitypes.MockEC2Client
+		setupMock   func(*apitypes.MockEC2Client)
 		tagKey      string
 		tagValue    string
 		wantAMI     string
@@ -36,8 +36,8 @@ func TestGetAMIWithTag(t *testing.T) {
 	}{
 		{
 			name: "found AMI with tag",
-			mockClient: &apitypes.MockEC2Client{
-				DescribeImagesOutput: &ec2.DescribeImagesOutput{
+			setupMock: func(m *apitypes.MockEC2Client) {
+				m.DescribeImagesOutput = &ec2.DescribeImagesOutput{
 					Images: []types.Image{
 						{
 							ImageId: aws.String("ami-123"),
@@ -49,7 +49,7 @@ func TestGetAMIWithTag(t *testing.T) {
 							},
 						},
 					},
-				},
+				}
 			},
 			tagKey:   "Status",
 			tagValue: "latest",
@@ -58,10 +58,10 @@ func TestGetAMIWithTag(t *testing.T) {
 		},
 		{
 			name: "no AMI found",
-			mockClient: &apitypes.MockEC2Client{
-				DescribeImagesOutput: &ec2.DescribeImagesOutput{
+			setupMock: func(m *apitypes.MockEC2Client) {
+				m.DescribeImagesOutput = &ec2.DescribeImagesOutput{
 					Images: []types.Image{},
-				},
+				}
 			},
 			tagKey:      "Status",
 			tagValue:    "latest",
@@ -73,9 +73,25 @@ func TestGetAMIWithTag(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			svc := NewService(tt.mockClient)
+			// Create a new mock client
+			mockClient := apitypes.NewMockEC2Client()
+			if tt.setupMock != nil {
+				tt.setupMock(mockClient)
+			}
+
+			// Set up mock client
+			client.SetEC2Client(mockClient)
+			t.Cleanup(func() {
+				client.ResetClient()
+			})
+
+			// Create service with mock client
+			svc := NewService(mockClient)
+
+			// Execute test
 			ami, err := svc.GetAMIWithTag(context.Background(), tt.tagKey, tt.tagValue)
 
+			// Check results
 			if tt.wantErr {
 				assert.Error(t, err)
 				if tt.errContains != "" {
@@ -94,7 +110,7 @@ func TestTagAMI(t *testing.T) {
 	testutil.InitTestLogger(t)
 	tests := []struct {
 		name        string
-		mockClient  *apitypes.MockEC2Client
+		setupMock   func(*apitypes.MockEC2Client)
 		amiID       string
 		tagKey      string
 		tagValue    string
@@ -103,8 +119,8 @@ func TestTagAMI(t *testing.T) {
 	}{
 		{
 			name: "successful tag",
-			mockClient: &apitypes.MockEC2Client{
-				CreateTagsOutput: &ec2.CreateTagsOutput{},
+			setupMock: func(m *apitypes.MockEC2Client) {
+				m.CreateTagsOutput = &ec2.CreateTagsOutput{}
 			},
 			amiID:    "ami-123",
 			tagKey:   "Status",
@@ -113,8 +129,8 @@ func TestTagAMI(t *testing.T) {
 		},
 		{
 			name: "error tagging",
-			mockClient: &apitypes.MockEC2Client{
-				CreateTagsError: fmt.Errorf("failed to tag AMI"),
+			setupMock: func(m *apitypes.MockEC2Client) {
+				m.CreateTagsError = fmt.Errorf("failed to tag AMI")
 			},
 			amiID:       "ami-123",
 			tagKey:      "Status",
@@ -126,9 +142,19 @@ func TestTagAMI(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			svc := NewService(tt.mockClient)
+			// Create a new mock client
+			mockClient := apitypes.NewMockEC2Client()
+			if tt.setupMock != nil {
+				tt.setupMock(mockClient)
+			}
+
+			// Create service with mock client
+			svc := NewService(mockClient)
+
+			// Execute test
 			err := svc.TagAMI(context.Background(), tt.amiID, tt.tagKey, tt.tagValue)
 
+			// Check results
 			if tt.wantErr {
 				assert.Error(t, err)
 				if tt.errContains != "" {
@@ -146,7 +172,7 @@ func TestMigrateInstance(t *testing.T) {
 	testutil.InitTestLogger(t)
 	tests := []struct {
 		name        string
-		mockClient  *apitypes.MockEC2Client
+		setupMock   func(*apitypes.MockEC2Client)
 		instanceID  string
 		newAMI      string
 		wantErr     bool
@@ -154,8 +180,8 @@ func TestMigrateInstance(t *testing.T) {
 	}{
 		{
 			name: "successful migration",
-			mockClient: &apitypes.MockEC2Client{
-				DescribeInstancesOutput: &ec2.DescribeInstancesOutput{
+			setupMock: func(m *apitypes.MockEC2Client) {
+				m.DescribeInstancesOutput = &ec2.DescribeInstancesOutput{
 					Reservations: []types.Reservation{
 						{
 							Instances: []types.Instance{
@@ -176,8 +202,8 @@ func TestMigrateInstance(t *testing.T) {
 							},
 						},
 					},
-				},
-				StopInstancesOutput: &ec2.StopInstancesOutput{
+				}
+				m.StopInstancesOutput = &ec2.StopInstancesOutput{
 					StoppingInstances: []types.InstanceStateChange{
 						{
 							CurrentState: &types.InstanceState{
@@ -186,8 +212,8 @@ func TestMigrateInstance(t *testing.T) {
 							InstanceId: aws.String("i-123"),
 						},
 					},
-				},
-				StartInstancesOutput: &ec2.StartInstancesOutput{
+				}
+				m.StartInstancesOutput = &ec2.StartInstancesOutput{
 					StartingInstances: []types.InstanceStateChange{
 						{
 							CurrentState: &types.InstanceState{
@@ -196,50 +222,55 @@ func TestMigrateInstance(t *testing.T) {
 							InstanceId: aws.String("i-123"),
 						},
 					},
-				},
-				RunInstancesOutput: &ec2.RunInstancesOutput{
+				}
+				m.RunInstancesOutput = &ec2.RunInstancesOutput{
 					Instances: []types.Instance{
 						{
 							InstanceId: aws.String("i-456"),
+							ImageId:    aws.String("ami-new"),
 							State: &types.InstanceState{
-								Name: types.InstanceStateNameRunning,
+								Name: types.InstanceStateNamePending,
 							},
 						},
 					},
-				},
-				TerminateInstancesOutput: &ec2.TerminateInstancesOutput{
+				}
+				m.TerminateInstancesOutput = &ec2.TerminateInstancesOutput{
 					TerminatingInstances: []types.InstanceStateChange{
 						{
 							CurrentState: &types.InstanceState{
-								Name: types.InstanceStateNameTerminated,
+								Name: types.InstanceStateNameShuttingDown,
 							},
 							InstanceId: aws.String("i-123"),
 						},
 					},
-				},
+				}
 			},
 			instanceID: "i-123",
 			newAMI:     "ami-new",
 			wantErr:    false,
 		},
 		{
-			name:        "instance not found",
-			mockClient:  &apitypes.MockEC2Client{},
-			instanceID:  "i-123",
+			name: "instance not found",
+			setupMock: func(m *apitypes.MockEC2Client) {
+				m.DescribeInstancesOutput = &ec2.DescribeInstancesOutput{
+					Reservations: []types.Reservation{},
+				}
+			},
+			instanceID:  "i-nonexistent",
 			newAMI:     "ami-new",
 			wantErr:    true,
 			errContains: "instance not found",
 		},
 		{
-			name: "same ami",
-			mockClient: &apitypes.MockEC2Client{
-				DescribeInstancesOutput: &ec2.DescribeInstancesOutput{
+			name: "stop instance error",
+			setupMock: func(m *apitypes.MockEC2Client) {
+				m.DescribeInstancesOutput = &ec2.DescribeInstancesOutput{
 					Reservations: []types.Reservation{
 						{
 							Instances: []types.Instance{
 								{
 									InstanceId: aws.String("i-123"),
-									ImageId:    aws.String("ami-new"),
+									ImageId:    aws.String("ami-old"),
 									State: &types.InstanceState{
 										Name: types.InstanceStateNameRunning,
 									},
@@ -247,19 +278,37 @@ func TestMigrateInstance(t *testing.T) {
 							},
 						},
 					},
-				},
+				}
+				m.StopInstancesError = fmt.Errorf("failed to stop instance")
 			},
-			instanceID: "i-123",
+			instanceID:  "i-123",
 			newAMI:     "ami-new",
-			wantErr:    false,
+			wantErr:    true,
+			errContains: "failed to stop instance",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			svc := NewService(tt.mockClient)
+			// Create a new mock client
+			mockClient := apitypes.NewMockEC2Client()
+			if tt.setupMock != nil {
+				tt.setupMock(mockClient)
+			}
+
+			// Set up mock client
+			client.SetEC2Client(mockClient)
+			t.Cleanup(func() {
+				client.ResetClient()
+			})
+
+			// Create service with mock client
+			svc := NewService(mockClient)
+
+			// Execute test
 			err := svc.MigrateInstance(context.Background(), tt.instanceID, tt.newAMI)
 
+			// Check results
 			if tt.wantErr {
 				assert.Error(t, err)
 				if tt.errContains != "" {
@@ -277,15 +326,15 @@ func TestBackupInstance(t *testing.T) {
 	testutil.InitTestLogger(t)
 	tests := []struct {
 		name        string
-		mockClient  *apitypes.MockEC2Client
+		setupMock   func(*apitypes.MockEC2Client)
 		instanceID  string
 		wantErr     bool
 		errContains string
 	}{
 		{
 			name: "successful backup",
-			mockClient: &apitypes.MockEC2Client{
-				DescribeInstancesOutput: &ec2.DescribeInstancesOutput{
+			setupMock: func(m *apitypes.MockEC2Client) {
+				m.DescribeInstancesOutput = &ec2.DescribeInstancesOutput{
 					Reservations: []types.Reservation{
 						{
 							Instances: []types.Instance{
@@ -298,21 +347,21 @@ func TestBackupInstance(t *testing.T) {
 							},
 						},
 					},
-				},
-				CreateSnapshotOutput: &ec2.CreateSnapshotOutput{
+				}
+				m.CreateSnapshotOutput = &ec2.CreateSnapshotOutput{
 					SnapshotId: aws.String("snap-123"),
-				},
-				CreateTagsOutput: &ec2.CreateTagsOutput{},
+				}
+				m.CreateTagsOutput = &ec2.CreateTagsOutput{}
 			},
 			instanceID: "i-123",
 			wantErr:    false,
 		},
 		{
 			name: "instance not found",
-			mockClient: &apitypes.MockEC2Client{
-				DescribeInstancesOutput: &ec2.DescribeInstancesOutput{
+			setupMock: func(m *apitypes.MockEC2Client) {
+				m.DescribeInstancesOutput = &ec2.DescribeInstancesOutput{
 					Reservations: []types.Reservation{},
-				},
+				}
 			},
 			instanceID:   "i-123",
 			wantErr:     true,
@@ -322,9 +371,19 @@ func TestBackupInstance(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			svc := NewService(tt.mockClient)
+			// Create a new mock client
+			mockClient := apitypes.NewMockEC2Client()
+			if tt.setupMock != nil {
+				tt.setupMock(mockClient)
+			}
+
+			// Create service with mock client
+			svc := NewService(mockClient)
+
+			// Execute test
 			err := svc.BackupInstance(context.Background(), tt.instanceID)
 
+			// Check results
 			if tt.wantErr {
 				assert.Error(t, err)
 				if tt.errContains != "" {
@@ -342,15 +401,15 @@ func TestListUserInstances(t *testing.T) {
 	testutil.InitTestLogger(t)
 	tests := []struct {
 		name        string
-		mockClient  *apitypes.MockEC2Client
+		setupMock   func(*apitypes.MockEC2Client)
 		userID      string
 		wantErr     bool
 		errContains string
 	}{
 		{
 			name: "successful list",
-			mockClient: &apitypes.MockEC2Client{
-				DescribeInstancesOutput: &ec2.DescribeInstancesOutput{
+			setupMock: func(m *apitypes.MockEC2Client) {
+				m.DescribeInstancesOutput = &ec2.DescribeInstancesOutput{
 					Reservations: []types.Reservation{
 						{
 							Instances: []types.Instance{
@@ -363,17 +422,17 @@ func TestListUserInstances(t *testing.T) {
 							},
 						},
 					},
-				},
+				}
 			},
 			userID:  "user123",
 			wantErr: false,
 		},
 		{
 			name: "no instances found",
-			mockClient: &apitypes.MockEC2Client{
-				DescribeInstancesOutput: &ec2.DescribeInstancesOutput{
+			setupMock: func(m *apitypes.MockEC2Client) {
+				m.DescribeInstancesOutput = &ec2.DescribeInstancesOutput{
 					Reservations: []types.Reservation{},
-				},
+				}
 			},
 			userID:      "user123",
 			wantErr:     false,
@@ -382,9 +441,19 @@ func TestListUserInstances(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			svc := NewService(tt.mockClient)
+			// Create a new mock client
+			mockClient := apitypes.NewMockEC2Client()
+			if tt.setupMock != nil {
+				tt.setupMock(mockClient)
+			}
+
+			// Create service with mock client
+			svc := NewService(mockClient)
+
+			// Execute test
 			instances, err := svc.ListUserInstances(context.Background(), tt.userID)
 
+			// Check results
 			if tt.wantErr {
 				assert.Error(t, err)
 				if tt.errContains != "" {
@@ -392,7 +461,7 @@ func TestListUserInstances(t *testing.T) {
 				}
 			} else {
 				assert.NoError(t, err)
-				if tt.mockClient.DescribeInstancesOutput != nil && len(tt.mockClient.DescribeInstancesOutput.Reservations) > 0 {
+				if mockClient.DescribeInstancesOutput != nil && len(mockClient.DescribeInstancesOutput.Reservations) > 0 {
 					assert.NotEmpty(t, instances)
 				} else {
 					assert.Empty(t, instances)
@@ -407,15 +476,15 @@ func TestCreateInstance(t *testing.T) {
 	testutil.InitTestLogger(t)
 	tests := []struct {
 		name        string
-		mockClient  *apitypes.MockEC2Client
+		setupMock   func(*apitypes.MockEC2Client)
 		config      InstanceConfig
 		wantErr     bool
 		errContains string
 	}{
 		{
 			name: "successful create",
-			mockClient: &apitypes.MockEC2Client{
-				RunInstancesOutput: &ec2.RunInstancesOutput{
+			setupMock: func(m *apitypes.MockEC2Client) {
+				m.RunInstancesOutput = &ec2.RunInstancesOutput{
 					Instances: []types.Instance{
 						{
 							InstanceId: aws.String("i-123"),
@@ -424,9 +493,9 @@ func TestCreateInstance(t *testing.T) {
 							},
 						},
 					},
-				},
-				CreateTagsOutput: &ec2.CreateTagsOutput{},
-				DescribeImagesOutput: &ec2.DescribeImagesOutput{
+				}
+				m.CreateTagsOutput = &ec2.CreateTagsOutput{}
+				m.DescribeImagesOutput = &ec2.DescribeImagesOutput{
 					Images: []types.Image{
 						{
 							ImageId: aws.String("ami-123"),
@@ -442,7 +511,7 @@ func TestCreateInstance(t *testing.T) {
 							},
 						},
 					},
-				},
+				}
 			},
 			config: InstanceConfig{
 				Name:   "test-instance",
@@ -454,7 +523,8 @@ func TestCreateInstance(t *testing.T) {
 		},
 		{
 			name: "invalid size",
-			mockClient: &apitypes.MockEC2Client{},
+			setupMock: func(m *apitypes.MockEC2Client) {
+			},
 			config: InstanceConfig{
 				Name:   "test-instance",
 				OSType: "linux",
@@ -468,9 +538,19 @@ func TestCreateInstance(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			svc := NewService(tt.mockClient)
+			// Create a new mock client
+			mockClient := apitypes.NewMockEC2Client()
+			if tt.setupMock != nil {
+				tt.setupMock(mockClient)
+			}
+
+			// Create service with mock client
+			svc := NewService(mockClient)
+
+			// Execute test
 			instance, err := svc.CreateInstance(context.Background(), tt.config)
 
+			// Check results
 			if tt.wantErr {
 				assert.Error(t, err)
 				if tt.errContains != "" {
@@ -489,7 +569,7 @@ func TestDeleteInstance(t *testing.T) {
 	testutil.InitTestLogger(t)
 	tests := []struct {
 		name        string
-		mockClient  *apitypes.MockEC2Client
+		setupMock   func(*apitypes.MockEC2Client)
 		userID      string
 		instanceID  string
 		wantErr     bool
@@ -497,8 +577,8 @@ func TestDeleteInstance(t *testing.T) {
 	}{
 		{
 			name: "successful delete",
-			mockClient: &apitypes.MockEC2Client{
-				DescribeInstancesOutput: &ec2.DescribeInstancesOutput{
+			setupMock: func(m *apitypes.MockEC2Client) {
+				m.DescribeInstancesOutput = &ec2.DescribeInstancesOutput{
 					Reservations: []types.Reservation{
 						{
 							Instances: []types.Instance{
@@ -511,8 +591,8 @@ func TestDeleteInstance(t *testing.T) {
 							},
 						},
 					},
-				},
-				TerminateInstancesOutput: &ec2.TerminateInstancesOutput{},
+				}
+				m.TerminateInstancesOutput = &ec2.TerminateInstancesOutput{}
 			},
 			userID:     "user123",
 			instanceID: "i-123",
@@ -520,10 +600,10 @@ func TestDeleteInstance(t *testing.T) {
 		},
 		{
 			name: "instance not found",
-			mockClient: &apitypes.MockEC2Client{
-				DescribeInstancesOutput: &ec2.DescribeInstancesOutput{
+			setupMock: func(m *apitypes.MockEC2Client) {
+				m.DescribeInstancesOutput = &ec2.DescribeInstancesOutput{
 					Reservations: []types.Reservation{},
-				},
+				}
 			},
 			userID:      "user123",
 			instanceID:  "i-123",
@@ -534,9 +614,19 @@ func TestDeleteInstance(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			svc := NewService(tt.mockClient)
+			// Create a new mock client
+			mockClient := apitypes.NewMockEC2Client()
+			if tt.setupMock != nil {
+				tt.setupMock(mockClient)
+			}
+
+			// Create service with mock client
+			svc := NewService(mockClient)
+
+			// Execute test
 			err := svc.DeleteInstance(context.Background(), tt.userID, tt.instanceID)
 
+			// Check results
 			if tt.wantErr {
 				assert.Error(t, err)
 				if tt.errContains != "" {

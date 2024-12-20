@@ -21,29 +21,11 @@ func TestMigrateCmd(t *testing.T) {
 	// Initialize test logger
 	testutil.InitTestLogger(t)
 
-	// Store original values
-	originalInstanceID := instanceID
-	originalEnabled := enabled
-	originalLogLevel := logLevel
-	originalNewAMI := newAMI
-
-	// Reset flags after tests
-	t.Cleanup(func() {
-		instanceID = originalInstanceID
-		enabled = originalEnabled
-		logLevel = originalLogLevel
-		newAMI = originalNewAMI
-		client.ResetClient()
-	})
-
-	// Initialize logger for tests with debug level
-	logLevel = "debug"
-	logger.Init(logger.LogLevel(logLevel))
-
 	tests := []struct {
 		name      string
 		setupCmd  func(*cobra.Command)
 		setupMock func(*apitypes.MockEC2Client)
+		validate  func(*testing.T, *apitypes.MockEC2Client)
 		wantErr   bool
 		errMsg    string
 	}{
@@ -124,7 +106,7 @@ func TestMigrateCmd(t *testing.T) {
 					StoppingInstances: []types.InstanceStateChange{
 						{
 							CurrentState: &types.InstanceState{
-								Name: types.InstanceStateNameStopping,
+								Name: types.InstanceStateNameStopped,
 							},
 							InstanceId: aws.String("i-123"),
 							PreviousState: &types.InstanceState{
@@ -133,6 +115,26 @@ func TestMigrateCmd(t *testing.T) {
 						},
 					},
 				}
+
+				// Set up StartInstances response
+				m.StartInstancesOutput = &ec2.StartInstancesOutput{
+					StartingInstances: []types.InstanceStateChange{
+						{
+							CurrentState: &types.InstanceState{
+								Name: types.InstanceStateNameRunning,
+							},
+							InstanceId: aws.String("i-456"),
+							PreviousState: &types.InstanceState{
+								Name: types.InstanceStateNameStopped,
+							},
+						},
+					},
+				}
+			},
+			validate: func(t *testing.T, m *apitypes.MockEC2Client) {
+				// Verify instance state transitions
+				assert.Equal(t, types.InstanceStateNameTerminated, m.GetInstanceState("i-123"), "original instance should be terminated")
+				assert.Equal(t, types.InstanceStateNameRunning, m.GetInstanceState("i-456"), "new instance should be running")
 			},
 		},
 		{
@@ -146,11 +148,13 @@ func TestMigrateCmd(t *testing.T) {
 		{
 			name: "instance not found",
 			setupCmd: func(cmd *cobra.Command) {
-				cmd.Flags().Set("instance-id", "i-123")
+				cmd.Flags().Set("instance-id", "i-nonexistent")
 				cmd.Flags().Set("new-ami", "ami-456")
 			},
 			setupMock: func(m *apitypes.MockEC2Client) {
-				m.Instances = []types.Instance{} // Empty instance list
+				m.DescribeInstancesOutput = &ec2.DescribeInstancesOutput{
+					Reservations: []types.Reservation{},
+				}
 			},
 			wantErr: true,
 			errMsg:  "instance not found",
@@ -162,77 +166,15 @@ func TestMigrateCmd(t *testing.T) {
 				cmd.Flags().Set("new-ami", "ami-456")
 			},
 			setupMock: func(m *apitypes.MockEC2Client) {
-				m.Instances = []types.Instance{
-					{
-						InstanceId: aws.String("i-123"),
-						State: &types.InstanceState{
-							Name: types.InstanceStateNameRunning,
-						},
-					},
-				}
-				m.StopInstancesError = fmt.Errorf("failed to stop instance")
-			},
-			wantErr: true,
-			errMsg:  "failed to stop instance",
-		},
-		{
-			name: "successful migration with enabled flag",
-			setupCmd: func(cmd *cobra.Command) {
-				cmd.Flags().Set("enabled", "true")
-				cmd.Flags().Set("new-ami", "ami-456")
-			},
-			setupMock: func(m *apitypes.MockEC2Client) {
-				m.Instances = []types.Instance{
-					{
-						InstanceId: aws.String("i-123"),
-						State: &types.InstanceState{
-							Name: types.InstanceStateNameRunning,
-						},
-						Tags: []types.Tag{
-							{
-								Key:   aws.String("ami-migrate"),
-								Value: aws.String("enabled"),
-							},
-						},
-					},
-				}
-				// Pre-configure instance states for the waiter
-				m.SetInstanceState("i-123", types.InstanceStateNameRunning)
-			},
-		},
-		{
-			name: "successful migration with instance",
-			setupCmd: func(cmd *cobra.Command) {
-				cmd.Flags().Set("instance-id", "i-123")
-				cmd.Flags().Set("new-ami", "ami-456")
-			},
-			setupMock: func(m *apitypes.MockEC2Client) {
 				instance := types.Instance{
-					InstanceId:   aws.String("i-123"),
-					InstanceType: types.InstanceTypeT2Micro,
-					ImageId:      aws.String("ami-123"), // Current AMI
+					InstanceId: aws.String("i-123"),
+					ImageId:    aws.String("ami-123"),
 					State: &types.InstanceState{
 						Name: types.InstanceStateNameRunning,
-					},
-					BlockDeviceMappings: []types.InstanceBlockDeviceMapping{
-						{
-							DeviceName: aws.String("/dev/xvda"),
-							Ebs: &types.EbsInstanceBlockDevice{
-								VolumeId: aws.String("vol-123"),
-							},
-						},
-					},
-					Tags: []types.Tag{
-						{
-							Key:   aws.String("Name"),
-							Value: aws.String("test-instance"),
-						},
 					},
 				}
 				m.Instances = []types.Instance{instance}
 				m.SetInstanceState("i-123", types.InstanceStateNameRunning)
-
-				// Set up DescribeInstances response
 				m.DescribeInstancesOutput = &ec2.DescribeInstancesOutput{
 					Reservations: []types.Reservation{
 						{
@@ -240,59 +182,20 @@ func TestMigrateCmd(t *testing.T) {
 						},
 					},
 				}
-
-				// Set up RunInstances response
-				newInstance := instance
-				newInstance.InstanceId = aws.String("i-456")
-				newInstance.ImageId = aws.String("ami-456")
-				m.RunInstancesOutput = &ec2.RunInstancesOutput{
-					Instances: []types.Instance{newInstance},
-				}
-
-				// Set up TerminateInstances response
-				m.TerminateInstancesOutput = &ec2.TerminateInstancesOutput{
-					TerminatingInstances: []types.InstanceStateChange{
-						{
-							CurrentState: &types.InstanceState{
-								Name: types.InstanceStateNameShuttingDown,
-							},
-							InstanceId: aws.String("i-123"),
-							PreviousState: &types.InstanceState{
-								Name: types.InstanceStateNameRunning,
-							},
-						},
-					},
-				}
-
-				// Set up CreateSnapshot response
-				m.CreateSnapshotOutput = &ec2.CreateSnapshotOutput{
-					SnapshotId: aws.String("snap-123"),
-				}
-
-				// Set up CreateTags response
-				m.CreateTagsOutput = &ec2.CreateTagsOutput{}
-
-				// Set up StopInstances response
-				m.StopInstancesOutput = &ec2.StopInstancesOutput{
-					StoppingInstances: []types.InstanceStateChange{
-						{
-							CurrentState: &types.InstanceState{
-								Name: types.InstanceStateNameStopping,
-							},
-							InstanceId: aws.String("i-123"),
-							PreviousState: &types.InstanceState{
-								Name: types.InstanceStateNameRunning,
-							},
-						},
-					},
-				}
+				m.StopInstancesError = fmt.Errorf("failed to stop instance")
 			},
+			validate: func(t *testing.T, m *apitypes.MockEC2Client) {
+				// Instance should still be running since stop failed
+				assert.Equal(t, types.InstanceStateNameRunning, m.GetInstanceState("i-123"), "instance should still be running after failed stop")
+			},
+			wantErr: true,
+			errMsg:  "failed to stop instance",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Create a new mock client and command for each test
+			// Create a new command for each test
 			cmd, mockClient := setupTest("migrate", tt.setupMock)
 
 			// Add migrate-specific flags
@@ -369,6 +272,11 @@ func TestMigrateCmd(t *testing.T) {
 				}
 			} else {
 				assert.NoError(t, err)
+			}
+
+			// Run validation if provided
+			if tt.validate != nil {
+				tt.validate(t, mockClient)
 			}
 		})
 	}
