@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
@@ -13,25 +12,24 @@ import (
 var deleteCmd = &cobra.Command{
 	Use:   "delete",
 	Short: "Delete an EC2 instance",
-	Long: `Delete an EC2 instance that you own.
-Requires:
-- Instance ID
-- Your user ID (to verify ownership)
-
-The command will show instance details and ask for confirmation before deletion.`,
+	Long: `Delete an EC2 instance owned by you.
+Requires the instance ID to be specified.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		userID, err := cmd.Flags().GetString("user")
+		// Get user ID
+		userID, err := getUserID(cmd)
 		if err != nil {
-			return fmt.Errorf("get user flag: %w", err)
+			return err
 		}
 
+		// Get instance ID
 		instanceID, err := cmd.Flags().GetString("instance-id")
 		if err != nil {
-			return fmt.Errorf("get instance-id flag: %w", err)
+			return err
 		}
 
-		if userID == "" || instanceID == "" {
-			return fmt.Errorf("both --user and --instance-id flags are required")
+		// Validate required flags
+		if instanceID == "" {
+			return fmt.Errorf("--instance-id flag is required")
 		}
 
 		// Load AWS configuration
@@ -42,51 +40,47 @@ The command will show instance details and ask for confirmation before deletion.
 
 		// Create EC2 client and AMI service
 		ec2Client := ec2.NewFromConfig(cfg)
-		amiService := ami.NewService(ec2Client)
+		svc := ami.NewService(ec2Client)
 
-		// Get instance details
-		instances, err := amiService.ListUserInstances(cmd.Context(), userID)
+		// Verify instance ownership
+		instances, err := svc.ListUserInstances(cmd.Context(), userID)
 		if err != nil {
-			return fmt.Errorf("list instances: %w", err)
+			return fmt.Errorf("failed to list instances: %v", err)
 		}
 
-		var instance *ami.InstanceSummary
-		for i, inst := range instances {
-			if inst.InstanceID == instanceID {
-				instance = &instances[i]
+		var found bool
+		for _, instance := range instances {
+			if instance.InstanceID == instanceID {
+				found = true
 				break
 			}
 		}
 
-		if instance == nil {
+		if !found {
 			return fmt.Errorf("instance %s not found or not owned by user %s", instanceID, userID)
 		}
 
-		// Show instance details and ask for confirmation
-		fmt.Printf("\nInstance to delete:\n")
-		fmt.Print(instance.FormatInstanceSummary())
-		fmt.Print("\nAre you sure you want to delete this instance? [y/N]: ")
-
+		// Confirm deletion
+		fmt.Printf("Are you sure you want to delete instance %s? [y/N] ", instanceID)
 		var confirm string
 		fmt.Scanln(&confirm)
-		if !strings.EqualFold(confirm, "y") {
-			fmt.Println("Instance deletion cancelled")
+		if confirm != "y" && confirm != "Y" {
+			fmt.Println("Deletion cancelled")
 			return nil
 		}
 
-		if err := amiService.DeleteInstance(cmd.Context(), userID, instanceID); err != nil {
-			return fmt.Errorf("delete instance: %w", err)
+		// Delete instance
+		if err := svc.DeleteInstance(cmd.Context(), userID, instanceID); err != nil {
+			return fmt.Errorf("failed to delete instance: %v", err)
 		}
 
-		fmt.Println("Instance deleted successfully")
+		fmt.Printf("Successfully deleted instance %s\n", instanceID)
 		return nil
 	},
 }
 
 func init() {
 	rootCmd.AddCommand(deleteCmd)
-	deleteCmd.Flags().String("user", "", "Your user ID")
 	deleteCmd.Flags().String("instance-id", "", "ID of the instance to delete")
-	deleteCmd.MarkFlagRequired("user")
 	deleteCmd.MarkFlagRequired("instance-id")
 }

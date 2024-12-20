@@ -24,11 +24,16 @@ docker run --rm \
 - Safe instance migration with volume snapshots
 - Selective migration based on instance state and tags
 - Comprehensive status tracking and error handling
+- Automatic user detection from AWS credentials
 
 ## Common Tasks
 
 ### 1. List Your Instances
 ```bash
+# Uses your AWS credentials username
+ami-migrate list
+
+# Or specify a different username
 ami-migrate list --user johndoe
 ```
 
@@ -42,6 +47,10 @@ Output shows:
 
 ### 2. Check Migration Status
 ```bash
+# Uses your AWS credentials username
+ami-migrate check
+
+# Or specify a different username
 ami-migrate check --user johndoe
 ```
 
@@ -53,11 +62,10 @@ Shows for each instance:
 ### 3. Create New Instance
 ```bash
 # Create default Ubuntu instance
-ami-migrate create --user johndoe
+ami-migrate create
 
 # Create custom RHEL instance
 ami-migrate create \
-  --user johndoe \
   --os RHEL9 \
   --size xlarge \
   --name my-instance
@@ -67,6 +75,7 @@ Options:
 - `--os`: Ubuntu (default) or RHEL9
 - `--size`: small, medium, large, xlarge
 - `--name`: Custom instance name
+- `--user`: Optional, defaults to AWS credentials username
 
 ### 4. Migrate Instances
 ```bash
@@ -89,6 +98,10 @@ The migration process:
 
 ### 5. Delete Instances
 ```bash
+# Delete using AWS credentials username
+ami-migrate delete --instance i-1234567890abcdef0
+
+# Or specify a different username
 ami-migrate delete \
   --user johndoe \
   --instance i-1234567890abcdef0
@@ -119,12 +132,13 @@ Value: enabled
 3. Owner Tag (Required for check/list):
 ```
 Key: Owner
-Value: <your-user-id>
+Value: <your-aws-username>
 ```
 
 Tag Requirements:
 - Running instances need BOTH `ami-migrate=enabled` AND `ami-migrate-if-running=enabled`
 - Stopped instances only need `ami-migrate=enabled`
+- Owner tag is automatically set to your AWS username when creating instances
 
 ## Migration Status Tracking
 
@@ -147,6 +161,7 @@ Value: [detailed status message]
 ### Prerequisites
 - Docker
 - Make
+- AWS credentials configured (for automatic user detection)
 
 ### Build and Test
 ```bash
@@ -172,10 +187,12 @@ ami-migrate/
 │   ├── migrate.go    
 │   └── root.go       
 ├── pkg/
-│   └── ami/          # Core functionality
-│       ├── ami.go    
-│       ├── ami_test.go
-│       └── mock_ec2.go
+│   ├── ami/          # Core functionality
+│   │   ├── ami.go    
+│   │   ├── ami_test.go
+│   │   └── mock_ec2.go
+│   └── config/       # Configuration
+│       └── aws.go    # AWS credentials handling
 ```
 
 ### Adding Features
@@ -185,77 +202,30 @@ ami-migrate/
 4. Create CLI command in `cmd/`
 5. Update documentation
 
-## Usage
+## Usage Notes
 
-The tool provides five main commands:
+All commands support automatic user detection from your AWS credentials. The `--user` flag is optional and only needed if you want to operate on instances owned by a different user.
 
-### 1. Check
+The tool will attempt to get your username in the following order:
+1. From the `--user` flag if provided
+2. From your AWS credentials file
+3. From the IAM user info
+4. From the STS caller identity
 
-Check the status of your instance and determine if a migration is needed:
-
-```bash
-ami-migrate check --user johndoe
-```
-
-### 2. Create
-
-Create a new instance:
+This means you can run most commands without explicitly specifying your username:
 
 ```bash
-ami-migrate create --user johndoe
-```
+# List your instances
+ami-migrate list
 
-### 3. List
+# Check migration status
+ami-migrate check
 
-List your instances:
+# Create a new instance
+ami-migrate create --os RHEL9
 
-```bash
-ami-migrate list --user johndoe
-```
-
-### 4. Migrate
-
-Migrate instances to a new AMI version:
-
-```bash
-# Migrate instances by tag
-ami-migrate migrate --new-ami ami-xxxxx
-
-# Migrate specific instance
-ami-migrate migrate --new-ami ami-xxxxx --instance-id i-xxxxx
-```
-
-Optional flags:
-- `--enabled-value`: Value to match for the ami-migrate tag (default: "enabled")
-- `--instance-id`: ID of specific instance to migrate (bypasses tag requirements)
-
-### 5. Backup
-
-Create snapshots of all volumes attached to instances:
-
-```bash
-# Backup instances by tag
-ami-migrate backup
-
-# Backup specific instance
-ami-migrate backup --instance-id i-xxxxx
-```
-
-Optional flags:
-- `--enabled-value`: Value to match for the ami-migrate tag (default: "enabled")
-- `--instance-id`: ID of specific instance to backup (bypasses tag requirements)
-
-The backup command will:
-1. Find all instances with the ami-migrate tag (or use specified instance)
-2. Create snapshots of all attached volumes
-3. Tag snapshots with instance and device information
-
-### 6. Delete
-
-Delete an instance:
-
-```bash
-ami-migrate delete --user johndoe --instance i-1234567890abcdef0
+# Delete an instance
+ami-migrate delete --instance i-xxxxx
 ```
 
 ## CI/CD Integration

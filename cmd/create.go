@@ -14,39 +14,34 @@ import (
 var createCmd = &cobra.Command{
 	Use:   "create",
 	Short: "Create a new EC2 instance",
-	Long: `Create a new EC2 instance with specified parameters.
-Requires:
-- OS type (linux or windows)
-- Instance size (e.g. t2.micro)
-- Instance name
-- Your user ID (for ownership)`,
+	Long: `Create a new EC2 instance with the specified configuration.
+The instance will be tagged with your user ID and ami-migrate tags.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		userID, err := cmd.Flags().GetString("user")
+		// Get user ID
+		userID, err := getUserID(cmd)
 		if err != nil {
-			return fmt.Errorf("get user flag: %w", err)
+			return err
 		}
 
+		// Get other flags
 		osType, err := cmd.Flags().GetString("os")
 		if err != nil {
-			return fmt.Errorf("get os flag: %w", err)
+			return err
 		}
 
 		size, err := cmd.Flags().GetString("size")
 		if err != nil {
-			return fmt.Errorf("get size flag: %w", err)
+			return err
 		}
 
 		name, err := cmd.Flags().GetString("name")
 		if err != nil {
-			return fmt.Errorf("get name flag: %w", err)
+			return err
 		}
 
-		if name == "" {
-			name = generateInstanceName()
-		}
-
-		if userID == "" || osType == "" || size == "" {
-			return fmt.Errorf("--user, --os, and --size flags are required")
+		// Validate required flags
+		if osType == "" || size == "" {
+			return fmt.Errorf("--os and --size flags are required")
 		}
 
 		// Load AWS configuration
@@ -59,16 +54,18 @@ Requires:
 		ec2Client := ec2.NewFromConfig(cfg)
 		amiService := ami.NewService(ec2Client)
 
+		// Create instance config
 		config := ami.InstanceConfig{
-			Name:   name,
+			UserID: userID,
 			OSType: osType,
 			Size:   size,
-			UserID: userID,
+			Name:   name,
 		}
 
+		// Create instance
 		instance, err := amiService.CreateInstance(cmd.Context(), config)
 		if err != nil {
-			return fmt.Errorf("create instance: %w", err)
+			return fmt.Errorf("failed to create instance: %v", err)
 		}
 
 		fmt.Println("Instance created successfully:")
@@ -83,7 +80,6 @@ func init() {
 	createCmd.Flags().String("os", "", "OS type (linux or windows)")
 	createCmd.Flags().String("size", "", "Instance size (e.g. t2.micro)")
 	createCmd.Flags().String("name", "", "Instance name (optional, random if not provided)")
-	createCmd.MarkFlagRequired("user")
 	createCmd.MarkFlagRequired("os")
 	createCmd.MarkFlagRequired("size")
 }

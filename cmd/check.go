@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
@@ -11,17 +12,17 @@ import (
 
 var checkCmd = &cobra.Command{
 	Use:   "check",
-	Short: "Check if instances need migration",
-	Long: `Check if your EC2 instances need to be migrated to a newer AMI.
-Shows current and latest AMI details for each instance.`,
+	Short: "Check instance migration status",
+	Long: `Check if your instances need to be migrated to a newer AMI.
+Shows:
+- Current AMI details
+- Latest available AMI
+- Migration recommendation`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		userID, err := cmd.Flags().GetString("user")
+		// Get user ID
+		userID, err := getUserID(cmd)
 		if err != nil {
-			return fmt.Errorf("get user flag: %w", err)
-		}
-
-		if userID == "" {
-			return fmt.Errorf("--user flag is required")
+			return err
 		}
 
 		// Load AWS configuration
@@ -32,14 +33,47 @@ Shows current and latest AMI details for each instance.`,
 
 		// Create EC2 client and AMI service
 		ec2Client := ec2.NewFromConfig(cfg)
-		amiService := ami.NewService(ec2Client)
+		svc := ami.NewService(ec2Client)
 
-		status, err := amiService.CheckMigrationStatus(cmd.Context(), userID)
+		// Check migration status
+		status, err := svc.CheckMigrationStatus(cmd.Context(), userID)
 		if err != nil {
-			return fmt.Errorf("check migration status: %w", err)
+			return fmt.Errorf("failed to check migration status: %v", err)
 		}
 
-		fmt.Print(status.FormatMigrationStatus())
+		// Display results
+		fmt.Printf("Instance Status for %s:\n", status.InstanceID)
+		fmt.Printf("  OS Type:        %s\n", status.OSType)
+		fmt.Printf("  Instance Type:  %s\n", status.InstanceType)
+		fmt.Printf("  State:          %s\n", status.InstanceState)
+		fmt.Printf("  Launch Time:    %s\n", status.LaunchTime.Format(time.RFC3339))
+		if status.PrivateIP != "" {
+			fmt.Printf("  Private IP:     %s\n", status.PrivateIP)
+		}
+		if status.PublicIP != "" {
+			fmt.Printf("  Public IP:      %s\n", status.PublicIP)
+		}
+
+		fmt.Println("\nAMI Status:")
+		fmt.Printf("  Current AMI:    %s\n", status.CurrentAMI)
+		if status.CurrentAMIInfo != nil {
+			fmt.Printf("    Name:         %s\n", status.CurrentAMIInfo.Name)
+			fmt.Printf("    Created:      %s\n", status.CurrentAMIInfo.CreatedDate)
+		}
+		if status.LatestAMI != "" {
+			fmt.Printf("  Latest AMI:     %s\n", status.LatestAMI)
+			if status.LatestAMIInfo != nil {
+				fmt.Printf("    Name:         %s\n", status.LatestAMIInfo.Name)
+				fmt.Printf("    Created:      %s\n", status.LatestAMIInfo.CreatedDate)
+			}
+		}
+
+		fmt.Printf("\nMigration Needed: %v\n", status.NeedsMigration)
+
+		if status.NeedsMigration {
+			fmt.Println("\nRun 'ami-migrate migrate' to update your instance to the latest AMI.")
+		}
+
 		return nil
 	},
 }
