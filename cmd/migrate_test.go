@@ -106,10 +106,19 @@ func TestMigrateCmd(t *testing.T) {
 						{
 							Instances: []types.Instance{
 								{
-									InstanceId: aws.String("i-123"),
-									ImageId:    aws.String("ami-123"),
+									InstanceId:   aws.String("i-123"),
+									ImageId:      aws.String("ami-123"),
+									InstanceType: types.InstanceTypeT2Micro,
 									State: &types.InstanceState{
 										Name: types.InstanceStateNameRunning,
+									},
+									BlockDeviceMappings: []types.InstanceBlockDeviceMapping{
+										{
+											DeviceName: aws.String("/dev/xvda"),
+											Ebs: &types.EbsInstanceBlockDevice{
+												VolumeId: aws.String("vol-123"),
+											},
+										},
 									},
 								},
 							},
@@ -117,6 +126,23 @@ func TestMigrateCmd(t *testing.T) {
 					},
 				}
 				m.StopInstancesError = fmt.Errorf("failed to stop instance")
+				m.Instance = &types.Instance{
+					InstanceId:   aws.String("i-123"),
+					ImageId:      aws.String("ami-123"),
+					InstanceType: types.InstanceTypeT2Micro,
+					State: &types.InstanceState{
+						Name: types.InstanceStateNameRunning,
+					},
+					BlockDeviceMappings: []types.InstanceBlockDeviceMapping{
+						{
+							DeviceName: aws.String("/dev/xvda"),
+							Ebs: &types.EbsInstanceBlockDevice{
+								VolumeId: aws.String("vol-123"),
+							},
+						},
+					},
+				}
+				m.Instances = []types.Instance{*m.Instance}
 			},
 			validate: func(t *testing.T, m *apitypes.MockEC2Client) {
 				// Instance should still be running since stop failed

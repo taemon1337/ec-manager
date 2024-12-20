@@ -119,6 +119,7 @@ func TestBackupCmd(t *testing.T) {
 				}
 
 				// Set up the create snapshot to fail
+				m.CreateSnapshotOutput = nil // Ensure output is nil when error is set
 				m.CreateSnapshotError = fmt.Errorf("failed to create snapshot")
 			},
 			wantErr: true,

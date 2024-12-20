@@ -111,29 +111,35 @@ The migration process:
 
 ### 5. Login to AWS
 ```bash
-# Login with default profile
-ecman login --role-arn arn:aws:iam::123456789012:role/MyRole
+# List available roles
+ecman login --list-roles
+
+# Login with a discovered role
+ecman login --role-arn ROLE_ARN
 
 # Login with MFA
 ecman login \
-  --role-arn arn:aws:iam::123456789012:role/MyRole \
-  --mfa-serial arn:aws:iam::123456789012:mfa/my-device \
+  --role-arn ROLE_ARN \
+  --mfa-serial MFA_DEVICE_ARN \
   --mfa-token 123456
 
 # Login with custom profile and session duration
 ecman login \
-  --role-arn arn:aws:iam::123456789012:role/MyRole \
+  --role-arn ROLE_ARN \
   --profile my-profile \
   --duration 7200
 ```
 
 Options:
-- `--role-arn`: (Required) ARN of the role to assume
+- `--list-roles`: List available roles in your AWS account
+- `--role-arn`: ARN of the role to assume. If not provided, available roles will be displayed
 - `--profile`: AWS profile to store credentials (default: "default")
 - `--mfa-serial`: ARN of the MFA device (if MFA is required)
 - `--mfa-token`: MFA token code (if MFA is required)
 - `--duration`: Session duration in seconds (default: 3600)
 - `--session-name`: Name for the role session (default: "ec-manager-session")
+
+Note: If you don't know your role ARN, use `--list-roles` to discover available roles. If you don't have permission to list roles, the tool will display your AWS Account ID which you can use to construct the role ARN manually.
 
 ### 6. Delete Instances
 ```bash

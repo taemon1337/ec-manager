@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/iam"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/spf13/cobra"
 	"gopkg.in/ini.v1"
@@ -18,9 +20,85 @@ type STSAPI interface {
 	AssumeRole(ctx context.Context, params *sts.AssumeRoleInput, optFns ...func(*sts.Options)) (*sts.AssumeRoleOutput, error)
 }
 
-// Variable to allow mocking in tests
-var newSTSClient = func(cfg aws.Config) STSAPI {
-	return sts.NewFromConfig(cfg)
+// iamAPI interface for mocking
+type iamAPI interface {
+	GetUser(ctx context.Context, params *iam.GetUserInput, optFns ...func(*iam.Options)) (*iam.GetUserOutput, error)
+	ListRoles(ctx context.Context, params *iam.ListRolesInput, optFns ...func(*iam.Options)) (*iam.ListRolesOutput, error)
+}
+
+// stsIdentityAPI interface for mocking
+type stsIdentityAPI interface {
+	GetCallerIdentity(ctx context.Context, params *sts.GetCallerIdentityInput, optFns ...func(*sts.Options)) (*sts.GetCallerIdentityOutput, error)
+}
+
+// Variables to allow mocking in tests
+var (
+	newSTSClient = func(cfg aws.Config) STSAPI {
+		return sts.NewFromConfig(cfg)
+	}
+	newIAMClient = func(cfg aws.Config) iamAPI {
+		return iam.NewFromConfig(cfg)
+	}
+	newSTSIdentityClient = func(cfg aws.Config) stsIdentityAPI {
+		return sts.NewFromConfig(cfg)
+	}
+)
+
+// discoverRoleARN attempts to discover available roles for the user
+func discoverRoleARN(ctx context.Context, cfg aws.Config) ([]string, error) {
+	var roleARNs []string
+	
+	// Create IAM client
+	iamClient := newIAMClient(cfg)
+	
+	// Try to get current user info
+	user, err := iamClient.GetUser(ctx, &iam.GetUserInput{})
+	if err != nil {
+		// Fallback to STS GetCallerIdentity if IAM access is restricted
+		stsIdentityClient := newSTSIdentityClient(cfg)
+		identity, err := stsIdentityClient.GetCallerIdentity(ctx, &sts.GetCallerIdentityInput{})
+		if err != nil {
+			return nil, fmt.Errorf("failed to get caller identity: %w", err)
+		}
+		
+		// Extract account ID from identity
+		accountID := *identity.Account
+		
+		// List roles (if we have permission)
+		roles, err := iamClient.ListRoles(ctx, &iam.ListRolesInput{})
+		if err == nil {
+			for _, role := range roles.Roles {
+				if role.RoleName != nil && role.Arn != nil {
+					roleARNs = append(roleARNs, *role.Arn)
+				}
+			}
+		}
+		
+		if len(roleARNs) == 0 {
+			// If we can't list roles, at least we have the account ID
+			return nil, fmt.Errorf("could not list roles. Your AWS Account ID is: %s\nUse this to construct your role ARN: arn:aws:iam::%s:role/YOUR_ROLE_NAME", accountID, accountID)
+		}
+		
+		return roleARNs, nil
+	}
+	
+	// We have user info, get account ID from ARN
+	accountID := strings.Split(*user.User.Arn, ":")[4]
+	
+	// List roles
+	roles, err := iamClient.ListRoles(ctx, &iam.ListRolesInput{})
+	if err != nil {
+		return nil, fmt.Errorf("could not list roles. Your AWS Account ID is: %s\nUse this to construct your role ARN: arn:aws:iam::%s:role/YOUR_ROLE_NAME", accountID, accountID)
+	}
+	
+	// Collect role ARNs
+	for _, role := range roles.Roles {
+		if role.RoleName != nil && role.Arn != nil {
+			roleARNs = append(roleARNs, *role.Arn)
+		}
+	}
+	
+	return roleARNs, nil
 }
 
 func NewLoginCmd() *cobra.Command {
@@ -31,6 +109,7 @@ func NewLoginCmd() *cobra.Command {
 		mfaToken    string
 		duration    int32
 		sessionName string
+		listRoles   bool
 	)
 
 	cmd := &cobra.Command{
@@ -45,6 +124,40 @@ The credentials will be stored in ~/.aws/credentials under the specified profile
 			cfg, err := config.LoadDefaultConfig(ctx)
 			if err != nil {
 				return fmt.Errorf("unable to load AWS config: %w", err)
+			}
+
+			// If --list-roles is specified, discover and display available roles
+			if listRoles {
+				roles, err := discoverRoleARN(ctx, cfg)
+				if err != nil {
+					fmt.Println(err.Error())
+					return nil
+				}
+				
+				fmt.Println("Available roles:")
+				for _, role := range roles {
+					fmt.Printf("- %s\n", role)
+				}
+				return nil
+			}
+
+			// Validate required role ARN
+			if roleArn == "" {
+				roles, err := discoverRoleARN(ctx, cfg)
+				if err != nil {
+					fmt.Println(err.Error())
+					return fmt.Errorf("--role-arn is required. Use --list-roles to see available roles")
+				}
+				
+				if len(roles) == 0 {
+					return fmt.Errorf("--role-arn is required and no roles were found")
+				}
+				
+				fmt.Println("Available roles:")
+				for _, role := range roles {
+					fmt.Printf("- %s\n", role)
+				}
+				return fmt.Errorf("--role-arn is required. Please select one of the roles above")
 			}
 
 			// Create STS client using the mockable function
@@ -123,9 +236,7 @@ The credentials will be stored in ~/.aws/credentials under the specified profile
 	cmd.Flags().StringVar(&mfaToken, "mfa-token", "", "MFA token code (if required)")
 	cmd.Flags().Int32Var(&duration, "duration", 3600, "Duration in seconds for the temporary credentials")
 	cmd.Flags().StringVar(&sessionName, "session-name", "ec-manager-session", "Name for the role session")
-
-	// Mark required flags
-	cmd.MarkFlagRequired("role-arn")
+	cmd.Flags().BoolVar(&listRoles, "list-roles", false, "List available roles and exit")
 
 	return cmd
 }
