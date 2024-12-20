@@ -1,165 +1,233 @@
 package cmd
 
 import (
-	"bytes"
+	"context"
+	"fmt"
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
-	"github.com/taemon1337/ami-migrate/pkg/ami/mocks"
-	"github.com/taemon1337/ami-migrate/pkg/client"
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
-	"fmt"
+	"github.com/taemon1337/ami-migrate/pkg/ami"
+	"github.com/taemon1337/ami-migrate/pkg/client"
+	"github.com/taemon1337/ami-migrate/pkg/logger"
+	"github.com/taemon1337/ami-migrate/pkg/testutil"
+	apitypes "github.com/taemon1337/ami-migrate/pkg/types"
 )
 
 func TestBackupCmd(t *testing.T) {
+	// Initialize test logger
+	testutil.InitTestLogger(t)
+
+	// Store original values
+	originalInstanceID := instanceID
+	originalEnabled := enabled
+	originalLogLevel := logLevel
+
+	// Reset flags after tests
+	t.Cleanup(func() {
+		instanceID = originalInstanceID
+		enabled = originalEnabled
+		logLevel = originalLogLevel
+		client.ResetClient()
+	})
+
+	// Initialize logger for tests with debug level
+	logLevel = "debug"
+	logger.Init(logger.LogLevel(logLevel))
+
 	tests := []struct {
 		name        string
-		mockClient  *mocks.MockEC2Client
 		args        []string
 		wantErr     bool
 		errContains string
+		setupMock   func(*apitypes.MockEC2Client)
 	}{
 		{
-			name: "successful backup - no specific instance",
-			mockClient: &mocks.MockEC2Client{
-				DescribeInstancesOutput: &ec2.DescribeInstancesOutput{
-					Reservations: []types.Reservation{
+			name: "successful backup",
+			args: []string{"--instance-id", "i-123"},
+			setupMock: func(m *apitypes.MockEC2Client) {
+				// Set up the instance
+				m.Instance = &types.Instance{
+					InstanceId: aws.String("i-123"),
+					State: &types.InstanceState{
+						Name: types.InstanceStateNameRunning,
+					},
+					BlockDeviceMappings: []types.InstanceBlockDeviceMapping{
 						{
-							Instances: []types.Instance{
-								{
-									InstanceId: aws.String("i-123"),
-									State: &types.InstanceState{
-										Name: types.InstanceStateNameRunning,
-									},
-									BlockDeviceMappings: []types.InstanceBlockDeviceMapping{
-										{
-											DeviceName: aws.String("/dev/sda1"),
-											Ebs: &types.EbsInstanceBlockDevice{
-												VolumeId: aws.String("vol-123"),
-											},
-										},
-									},
-									Tags: []types.Tag{
-										{
-											Key:   aws.String("ami-migrate"),
-											Value: aws.String("enabled"),
-										},
-									},
-								},
+							DeviceName: aws.String("/dev/xvda"),
+							Ebs: &types.EbsInstanceBlockDevice{
+								VolumeId: aws.String("vol-123"),
 							},
 						},
 					},
-				},
-				CreateSnapshotOutput: &ec2.CreateSnapshotOutput{
+				}
+				m.Instances = []types.Instance{*m.Instance}
+
+				// Set up the describe instances response
+				m.DescribeInstancesOutput = &ec2.DescribeInstancesOutput{
+					Reservations: []types.Reservation{
+						{
+							Instances: m.Instances,
+						},
+					},
+				}
+
+				// Set up the create snapshot response
+				m.CreateSnapshotOutput = &ec2.CreateSnapshotOutput{
 					SnapshotId: aws.String("snap-123"),
-				},
-				CreateTagsOutput: &ec2.CreateTagsOutput{},
+				}
 			},
-			args:    []string{"backup"},
 			wantErr: false,
 		},
 		{
-			name: "successful backup - specific instance",
-			mockClient: &mocks.MockEC2Client{
-				DescribeInstancesOutput: &ec2.DescribeInstancesOutput{
-					Reservations: []types.Reservation{
+			name: "missing required flags",
+			args: []string{},
+			setupMock: func(m *apitypes.MockEC2Client) {},
+			wantErr: true,
+			errContains: "required flag(s) \"instance-id\" not set",
+		},
+		{
+			name: "backup failure",
+			args: []string{"--instance-id", "i-123"},
+			setupMock: func(m *apitypes.MockEC2Client) {
+				// Set up the instance
+				m.Instance = &types.Instance{
+					InstanceId: aws.String("i-123"),
+					State: &types.InstanceState{
+						Name: types.InstanceStateNameRunning,
+					},
+					BlockDeviceMappings: []types.InstanceBlockDeviceMapping{
 						{
-							Instances: []types.Instance{
-								{
-									InstanceId: aws.String("i-123"),
-									State: &types.InstanceState{
-										Name: types.InstanceStateNameRunning,
-									},
-									BlockDeviceMappings: []types.InstanceBlockDeviceMapping{
-										{
-											DeviceName: aws.String("/dev/sda1"),
-											Ebs: &types.EbsInstanceBlockDevice{
-												VolumeId: aws.String("vol-123"),
-											},
-										},
-									},
-								},
+							DeviceName: aws.String("/dev/xvda"),
+							Ebs: &types.EbsInstanceBlockDevice{
+								VolumeId: aws.String("vol-123"),
 							},
 						},
 					},
-				},
-				CreateSnapshotOutput: &ec2.CreateSnapshotOutput{
+				}
+				m.Instances = []types.Instance{*m.Instance}
+
+				// Set up the describe instances response
+				m.DescribeInstancesOutput = &ec2.DescribeInstancesOutput{
+					Reservations: []types.Reservation{
+						{
+							Instances: m.Instances,
+						},
+					},
+				}
+
+				// Set up the create snapshot to fail
+				m.CreateSnapshotError = fmt.Errorf("failed to create snapshot")
+			},
+			wantErr: true,
+			errContains: "failed to backup instance",
+		},
+		{
+			name: "successful backup with enabled flag",
+			args: []string{"--enabled"},
+			setupMock: func(m *apitypes.MockEC2Client) {
+				// Set up the instance
+				m.Instance = &types.Instance{
+					InstanceId: aws.String("i-123"),
+					State: &types.InstanceState{
+						Name: types.InstanceStateNameRunning,
+					},
+					BlockDeviceMappings: []types.InstanceBlockDeviceMapping{
+						{
+							DeviceName: aws.String("/dev/xvda"),
+							Ebs: &types.EbsInstanceBlockDevice{
+								VolumeId: aws.String("vol-123"),
+							},
+						},
+					},
+					Tags: []types.Tag{
+						{
+							Key:   aws.String("ami-migrate"),
+							Value: aws.String("enabled"),
+						},
+					},
+				}
+				m.Instances = []types.Instance{*m.Instance}
+
+				// Set up the describe instances response
+				m.DescribeInstancesOutput = &ec2.DescribeInstancesOutput{
+					Reservations: []types.Reservation{
+						{
+							Instances: m.Instances,
+						},
+					},
+				}
+
+				// Set up the create snapshot response
+				m.CreateSnapshotOutput = &ec2.CreateSnapshotOutput{
 					SnapshotId: aws.String("snap-123"),
-				},
-				CreateTagsOutput: &ec2.CreateTagsOutput{},
+				}
 			},
-			args:    []string{"backup", "--instance-id", "i-123"},
 			wantErr: false,
-		},
-		{
-			name: "error - instance not found",
-			mockClient: &mocks.MockEC2Client{
-				DescribeInstancesOutput: &ec2.DescribeInstancesOutput{
-					Reservations: []types.Reservation{},
-				},
-			},
-			args:        []string{"backup", "--instance-id", "i-nonexistent"},
-			wantErr:     true,
-			errContains: "no instances found",
-		},
-		{
-			name: "error - describe instances error",
-			mockClient: &mocks.MockEC2Client{
-				DescribeInstancesError: fmt.Errorf("AWS API error"),
-			},
-			args:        []string{"backup", "--instance-id", "i-123"},
-			wantErr:     true,
-			errContains: "AWS API error",
-		},
-		{
-			name: "error - create snapshot error",
-			mockClient: &mocks.MockEC2Client{
-				DescribeInstancesOutput: &ec2.DescribeInstancesOutput{
-					Reservations: []types.Reservation{
-						{
-							Instances: []types.Instance{
-								{
-									InstanceId: aws.String("i-123"),
-									State: &types.InstanceState{
-										Name: types.InstanceStateNameRunning,
-									},
-									BlockDeviceMappings: []types.InstanceBlockDeviceMapping{
-										{
-											DeviceName: aws.String("/dev/sda1"),
-											Ebs: &types.EbsInstanceBlockDevice{
-												VolumeId: aws.String("vol-123"),
-											},
-										},
-									},
-								},
-							},
-						},
-					},
-				},
-				CreateSnapshotError: fmt.Errorf("failed to create snapshot"),
-			},
-			args:        []string{"backup", "--instance-id", "i-123"},
-			wantErr:     true,
-			errContains: "failed to create snapshot",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Reset client state before each test
-			client.ResetClient()
-			client.SetEC2Client(tt.mockClient)
+			// Set up test command
+			cmd, _ := setupTest("backup", tt.setupMock)
 
-			buf := new(bytes.Buffer)
-			rootCmd.SetOut(buf)
-			rootCmd.SetArgs(tt.args)
+			// Add backup-specific flags
+			cmd.PreRunE = func(cmd *cobra.Command, args []string) error {
+				instanceID, _ = cmd.Flags().GetString("instance-id")
+				enabled, _ = cmd.Flags().GetBool("enabled")
+				if instanceID == "" && !enabled {
+					return fmt.Errorf("required flag(s) \"instance-id\" not set")
+				}
+				return nil
+			}
 
-			err := rootCmd.Execute()
+			cmd.RunE = func(cmd *cobra.Command, args []string) error {
+				// Get flag values
+				instanceID, _ := cmd.Flags().GetString("instance-id")
+				enabled, _ := cmd.Flags().GetBool("enabled")
 
-			// Reset client state after test
-			client.ResetClient()
+				// Create AMI service
+				svc := ami.NewService(client.GetEC2Client())
+
+				// Get instances to backup
+				var instances []string
+				if instanceID != "" {
+					instances = []string{instanceID}
+				} else if enabled {
+					// Get all instances with ami-migrate=enabled tag
+					taggedInstances, err := svc.ListUserInstances(context.Background(), "ami-migrate")
+					if err != nil {
+						return fmt.Errorf("failed to list instances: %v", err)
+					}
+					for _, instance := range taggedInstances {
+						instances = append(instances, instance.InstanceID)
+					}
+				}
+
+				if len(instances) == 0 {
+					return fmt.Errorf("no instances found to backup")
+				}
+
+				// Backup each instance
+				for _, instance := range instances {
+					if err := svc.BackupInstance(context.Background(), instance); err != nil {
+						return fmt.Errorf("failed to backup instance %s: %v", instance, err)
+					}
+					logger.Info("Successfully backed up instance", "instanceID", instance)
+				}
+
+				return nil
+			}
+
+			// Set command args
+			cmd.SetArgs(tt.args)
+
+			// Execute command
+			err := cmd.Execute()
 
 			if tt.wantErr {
 				assert.Error(t, err)

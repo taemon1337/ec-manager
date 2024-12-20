@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
@@ -15,6 +16,7 @@ import (
 func main() {
 	// Parse command line arguments
 	enabledValue := flag.String("enabled-value", "enabled", "Value to match for the ami-migrate tag")
+	timeoutValue := flag.Duration("timeout", 10*time.Minute, "Timeout for the migration process")
 	flag.Parse()
 
 	// Load AWS configuration
@@ -29,11 +31,15 @@ func main() {
 	// Create AMI service
 	amiService := ami.NewService(ec2Client)
 
+	// Set timeout from flag
+	ctx, cancel := context.WithTimeout(context.Background(), *timeoutValue)
+	defer cancel()
+
 	// Migrate instances
 	fmt.Printf("Starting migration for instances with tag 'ami-migrate=%s'\n", *enabledValue)
 	fmt.Printf("Instances with 'ami-migrate-if-running=enabled' will be started if needed\n")
 
-	if err := amiService.MigrateInstances(context.Background(), *enabledValue); err != nil {
+	if err := amiService.MigrateInstances(ctx, *enabledValue); err != nil {
 		log.Fatalf("Failed to migrate instances: %v", err)
 	}
 

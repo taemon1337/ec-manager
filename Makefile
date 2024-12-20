@@ -75,7 +75,7 @@ test:
 	@echo "Running tests..."
 	docker run $(DOCKER_RUN_OPTS) \
 		golang:$(GO_VERSION)-alpine \
-		/bin/sh -c "go mod download && go test -v ./..."
+		/bin/sh -c "go test -v ./... -count=1"
 
 # Run linter
 lint:

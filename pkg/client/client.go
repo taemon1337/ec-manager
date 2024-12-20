@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"fmt"
+	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
@@ -21,7 +22,12 @@ func GetEC2Client() types.EC2ClientAPI {
 	}
 
 	if inTest {
-		panic("EC2 client not set in test mode")
+		panic("EC2 client not set in test mode. You must call SetEC2Client with a mock client before using GetEC2Client in tests")
+	}
+
+	// Ensure we're not in a test package
+	if isTestPackage() {
+		panic("Attempting to use real AWS client in test code. Use SetEC2Client with a mock client instead")
 	}
 
 	// Load AWS configuration for real usage
@@ -35,12 +41,23 @@ func GetEC2Client() types.EC2ClientAPI {
 
 // SetEC2Client sets the EC2 client (used for testing)
 func SetEC2Client(client types.EC2ClientAPI) {
+	if !isTestPackage() {
+		panic("SetEC2Client should only be called from test code")
+	}
 	ec2Client = client
 	inTest = true
 }
 
 // ResetClient resets the client (used for testing)
 func ResetClient() {
+	if !isTestPackage() {
+		panic("ResetClient should only be called from test code")
+	}
 	ec2Client = nil
 	inTest = false
+}
+
+// isTestPackage returns true if the code is running in a test package
+func isTestPackage() bool {
+	return testing.Testing()
 }

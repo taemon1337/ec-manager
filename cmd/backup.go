@@ -1,58 +1,82 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/spf13/cobra"
 	"github.com/taemon1337/ami-migrate/pkg/ami"
 	"github.com/taemon1337/ami-migrate/pkg/client"
+	"github.com/taemon1337/ami-migrate/pkg/logger"
 )
 
+// backupCmd represents the backup command
 var backupCmd = &cobra.Command{
 	Use:   "backup",
-	Short: "Backup EC2 instances",
-	Long: `Backup EC2 instances by creating AMIs.
-If --instance-id is provided, backs up that specific instance.
-Otherwise, looks for instances with appropriate tags:
-- Running instances require both ami-migrate=enabled and ami-migrate-if-running=enabled tags
-- Stopped instances only require ami-migrate=enabled tag.`,
+	Short: "Create a backup AMI from an EC2 instance",
+	Long: `backup creates a backup AMI from an EC2 instance. You can specify a single instance
+using the --instance-id flag, or back up all instances with the ami-migrate=enabled tag
+by using the --enabled flag.`,
+	PreRunE: func(cmd *cobra.Command, args []string) error {
+		// Validate required flags
+		instanceID, _ := cmd.Flags().GetString("instance-id")
+		enabled, _ := cmd.Flags().GetBool("enabled")
+
+		if instanceID == "" && !enabled {
+			return fmt.Errorf("required flag(s) \"instance-id\" not set")
+		}
+
+		return nil
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// Create AMI service with EC2 client
-		amiService := ami.NewService(client.GetEC2Client())
+		logger.Info("Starting backup process")
 
-		// Get flags
-		instanceID, err := cmd.Flags().GetString("instance-id")
-		if err != nil {
-			return fmt.Errorf("get instance-id flag: %w", err)
-		}
+		// Get flag values
+		instanceID, _ := cmd.Flags().GetString("instance-id")
+		enabled, _ := cmd.Flags().GetBool("enabled")
 
-		enabledValue, err := cmd.Flags().GetString("enabled-value")
-		if err != nil {
-			return fmt.Errorf("get enabled-value flag: %w", err)
-		}
+		// Create AWS clients
+		ec2Client := client.GetEC2Client()
 
-		// Backup instances
+		// Create AMI service
+		svc := ami.NewService(ec2Client)
+
+		// Get instances to backup
+		var instances []string
 		if instanceID != "" {
-			fmt.Printf("Starting backup of instance %s\n", instanceID)
-			if err := amiService.BackupInstance(cmd.Context(), instanceID); err != nil {
-				return fmt.Errorf("Failed to backup instance: %v", err)
+			instances = []string{instanceID}
+		} else if enabled {
+			// Get all instances with ami-migrate=enabled tag
+			taggedInstances, err := svc.ListUserInstances(context.Background(), "ami-migrate")
+			if err != nil {
+				return fmt.Errorf("failed to list instances: %v", err)
 			}
-		} else {
-			fmt.Printf("Starting backup of instances with tag 'ami-migrate=%s'\n", enabledValue)
-			fmt.Printf("Instances with 'ami-migrate-if-running=enabled' will be started if needed\n")
-
-			if err := amiService.BackupInstances(cmd.Context(), enabledValue); err != nil {
-				return fmt.Errorf("Failed to backup instances: %v", err)
+			for _, instance := range taggedInstances {
+				instances = append(instances, instance.InstanceID)
 			}
 		}
 
-		fmt.Println("Backup completed successfully")
+		if len(instances) == 0 {
+			return fmt.Errorf("no instances found to backup")
+		}
+
+		// Backup each instance
+		for _, instance := range instances {
+			logger.Info(fmt.Sprintf("Creating backup AMI for instance %s", instance))
+			if err := svc.BackupInstance(context.Background(), instance); err != nil {
+				return fmt.Errorf("failed to backup instance %s: %v", instance, err)
+			}
+			logger.Info(fmt.Sprintf("Successfully created backup for instance %s", instance))
+		}
+
 		return nil
 	},
 }
 
 func init() {
 	rootCmd.AddCommand(backupCmd)
-	backupCmd.Flags().String("instance-id", "", "ID of specific instance to backup")
-	backupCmd.Flags().String("enabled-value", "enabled", "Value to match for the ami-migrate tag")
+
+	// Add flags
+	backupCmd.Flags().String("instance-id", "", "ID of the instance to backup")
+	backupCmd.Flags().Bool("enabled", false, "Backup all instances with ami-migrate=enabled tag")
 }

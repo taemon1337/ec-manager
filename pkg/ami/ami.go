@@ -10,6 +10,9 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
+	"github.com/taemon1337/ami-migrate/pkg/client"
+	"github.com/taemon1337/ami-migrate/pkg/config"
+	"github.com/taemon1337/ami-migrate/pkg/logger"
 	apitypes "github.com/taemon1337/ami-migrate/pkg/types"
 )
 
@@ -43,6 +46,8 @@ func NewService(client apitypes.EC2ClientAPI) *Service {
 
 // GetAMIWithTag gets an AMI by its tag
 func (s *Service) GetAMIWithTag(ctx context.Context, tagKey, tagValue string) (string, error) {
+	logger.Debug("Looking for AMI", "tagKey", tagKey, "tagValue", tagValue)
+
 	input := &ec2.DescribeImagesInput{
 		Filters: []types.Filter{
 			{
@@ -54,13 +59,16 @@ func (s *Service) GetAMIWithTag(ctx context.Context, tagKey, tagValue string) (s
 
 	result, err := s.client.DescribeImages(ctx, input)
 	if err != nil {
+		logger.Error("Failed to describe images", "error", err)
 		return "", fmt.Errorf("describe images: %w", err)
 	}
 
 	if len(result.Images) == 0 {
-		return "", nil
+		logger.Warn("No AMI found with tag", "tagKey", tagKey, "tagValue", tagValue)
+		return "", fmt.Errorf("no AMI found with tag %s=%s", tagKey, tagValue)
 	}
 
+	logger.Info("Found AMI", "amiID", *result.Images[0].ImageId)
 	return aws.ToString(result.Images[0].ImageId), nil
 }
 
@@ -82,15 +90,21 @@ func (s *Service) TagAMI(ctx context.Context, amiID, tagKey, tagValue string) er
 
 // MigrateInstances migrates instances to new AMI if they have the enabled tag
 func (s *Service) MigrateInstances(ctx context.Context, enabledValue string) error {
+	logger.Info("Starting migration of enabled instances", "enabledValue", enabledValue)
+
+	// Get enabled instances
 	instances, err := s.fetchEnabledInstances(ctx, enabledValue)
 	if err != nil {
-		return fmt.Errorf("fetch instances: %w", err)
+		logger.Error("Failed to fetch enabled instances", "error", err)
+		return fmt.Errorf("fetch enabled instances: %w", err)
 	}
 
 	if len(instances) == 0 {
+		logger.Info("No instances found with enabled tag")
 		return nil
 	}
 
+	// Process instances concurrently
 	var wg sync.WaitGroup
 	errChan := make(chan error, len(instances))
 
@@ -98,23 +112,39 @@ func (s *Service) MigrateInstances(ctx context.Context, enabledValue string) err
 		wg.Add(1)
 		go func(inst types.Instance) {
 			defer wg.Done()
-			if err := s.MigrateInstance(ctx, aws.ToString(inst.InstanceId)); err != nil {
+
+			// Get the OS type
+			osType, err := s.GetInstanceOSType(ctx, aws.ToString(inst.InstanceId))
+			if err != nil {
+				errChan <- fmt.Errorf("get instance OS type %s: %w", aws.ToString(inst.InstanceId), err)
+				return
+			}
+
+			// Get the latest AMI
+			latestAMI, err := s.GetLatestAMI(ctx, osType)
+			if err != nil {
+				errChan <- fmt.Errorf("get latest AMI for instance %s: %w", aws.ToString(inst.InstanceId), err)
+				return
+			}
+
+			if err := s.MigrateInstance(ctx, aws.ToString(inst.InstanceId), latestAMI); err != nil {
 				errChan <- fmt.Errorf("migrate instance %s: %w", aws.ToString(inst.InstanceId), err)
 			}
 		}(instance)
 	}
 
+	// Wait for all goroutines to finish
 	wg.Wait()
 	close(errChan)
 
-	// Collect any errors
+	// Check for any errors
 	var errs []error
 	for err := range errChan {
 		errs = append(errs, err)
 	}
 
 	if len(errs) > 0 {
-		return fmt.Errorf("migration errors: %v", errs)
+		return fmt.Errorf("failed to migrate some instances: %v", errs)
 	}
 
 	return nil
@@ -174,10 +204,7 @@ func (s *Service) startInstance(ctx context.Context, instance types.Instance) er
 	}
 
 	// Wait for instance to start
-	waiter := ec2.NewInstanceRunningWaiter(s.client)
-	return waiter.Wait(ctx, &ec2.DescribeInstancesInput{
-		InstanceIds: []string{aws.ToString(instance.InstanceId)},
-	}, 5*time.Minute)
+	return waitForInstanceState(ctx, aws.ToString(instance.InstanceId), types.InstanceStateNameRunning)
 }
 
 func (s *Service) stopInstance(ctx context.Context, instance types.Instance) error {
@@ -190,10 +217,7 @@ func (s *Service) stopInstance(ctx context.Context, instance types.Instance) err
 	}
 
 	// Wait for instance to stop
-	waiter := ec2.NewInstanceStoppedWaiter(s.client)
-	return waiter.Wait(ctx, &ec2.DescribeInstancesInput{
-		InstanceIds: []string{aws.ToString(instance.InstanceId)},
-	}, 5*time.Minute)
+	return waitForInstanceState(ctx, aws.ToString(instance.InstanceId), types.InstanceStateNameStopped)
 }
 
 func (s *Service) upgradeInstance(ctx context.Context, instance types.Instance, newAMI string) error {
@@ -390,10 +414,10 @@ func (s *Service) RestoreInstance(ctx context.Context, instanceID, snapshotID st
 	}
 
 	// Wait for volume to be available
-	waiter := ec2.NewVolumeAvailableWaiter(s.client)
+	waiter := ec2.NewVolumeAvailableWaiter(client.GetEC2Client())
 	if err := waiter.Wait(ctx, &ec2.DescribeVolumesInput{
 		VolumeIds: []string{aws.ToString(volume.VolumeId)},
-	}, 5*time.Minute); err != nil {
+	}, config.GetTimeout()); err != nil {
 		return fmt.Errorf("volume did not become available: %w", err)
 	}
 
@@ -407,10 +431,10 @@ func (s *Service) RestoreInstance(ctx context.Context, instanceID, snapshotID st
 		}
 
 		// Wait for instance to stop
-		stopWaiter := ec2.NewInstanceStoppedWaiter(s.client)
+		stopWaiter := ec2.NewInstanceStoppedWaiter(client.GetEC2Client())
 		if err := stopWaiter.Wait(ctx, &ec2.DescribeInstancesInput{
 			InstanceIds: []string{instanceID},
-		}, 5*time.Minute); err != nil {
+		}, config.GetTimeout()); err != nil {
 			return fmt.Errorf("instance did not stop: %w", err)
 		}
 	}
@@ -463,32 +487,23 @@ func (s *Service) getInstances(ctx context.Context, enabledValue string) ([]type
 	return instances, nil
 }
 
-func (s *Service) MigrateInstance(ctx context.Context, instanceID string) error {
-	// Determine the OS type
-	osType, err := s.GetInstanceOSType(ctx, instanceID)
-	if err != nil {
-		return fmt.Errorf("get OS type: %w", err)
-	}
+func (s *Service) MigrateInstance(ctx context.Context, instanceID string, newAMI string) error {
+	logger.Info("Starting instance migration", "instanceID", instanceID, "newAMI", newAMI)
 
-	// Get the latest AMI for this OS type
-	latestAMI, err := s.GetLatestAMI(ctx, osType)
-	if err != nil {
-		return fmt.Errorf("get latest AMI: %w", err)
-	}
-
-	// Get the current AMI ID
+	// Get the instance
 	instance, err := s.getInstance(ctx, instanceID)
 	if err != nil {
 		return fmt.Errorf("get instance: %w", err)
 	}
 
+	// Get the current AMI ID
 	currentAMI := aws.ToString(instance.ImageId)
-	if currentAMI == latestAMI {
-		return nil // Already on latest AMI
+	if currentAMI == newAMI {
+		return nil // Already on target AMI
 	}
 
 	// Perform the migration
-	return s.migrateInstanceToAMI(ctx, instance, latestAMI)
+	return s.migrateInstanceToAMI(ctx, instance, newAMI)
 }
 
 func (s *Service) GetLatestAMI(ctx context.Context, osType string) (string, error) {
@@ -626,59 +641,52 @@ func (s *Service) migrateInstanceToAMI(ctx context.Context, instance types.Insta
 }
 
 func (s *Service) BackupInstance(ctx context.Context, instanceID string) error {
-	// Get instance
-	input := &ec2.DescribeInstancesInput{
-		InstanceIds: []string{instanceID},
-	}
-	result, err := s.client.DescribeInstances(ctx, input)
-	if err != nil {
-		return fmt.Errorf("failed to get instance: %w", err)
-	}
-	if len(result.Reservations) == 0 || len(result.Reservations[0].Instances) == 0 {
-		return fmt.Errorf("instance not found: %s", instanceID)
-	}
-	instance := result.Reservations[0].Instances[0]
+	logger.Info("Starting instance backup", "instanceID", instanceID)
 
-	s.tagInstanceStatus(ctx, instance, "in-progress", "Creating volume snapshots")
+	// Get instance details
+	instance, err := s.getInstance(ctx, instanceID)
+	if err != nil {
+		logger.Error("Failed to get instance", "instanceID", instanceID, "error", err)
+		return fmt.Errorf("failed to get instance: %v", err)
+	}
 
 	// Create snapshots for each volume
-	for _, device := range instance.BlockDeviceMappings {
-		if device.Ebs == nil {
-			continue
-		}
+	for _, blockDevice := range instance.BlockDeviceMappings {
+		if blockDevice.Ebs != nil {
+			volumeID := aws.ToString(blockDevice.Ebs.VolumeId)
+			deviceName := aws.ToString(blockDevice.DeviceName)
+			logger.Debug("Creating snapshot for volume", "instanceID", instanceID, "volumeID", volumeID, "deviceName", deviceName)
 
-		description := fmt.Sprintf("Backup of volume %s from instance %s",
-			aws.ToString(device.Ebs.VolumeId),
-			aws.ToString(instance.InstanceId))
-
-		input := &ec2.CreateSnapshotInput{
-			VolumeId:    device.Ebs.VolumeId,
-			Description: aws.String(description),
-			TagSpecifications: []types.TagSpecification{
-				{
-					ResourceType: types.ResourceTypeSnapshot,
-					Tags: []types.Tag{
-						{
-							Key:   aws.String("ami-migrate-instance"),
-							Value: instance.InstanceId,
-						},
-						{
-							Key:   aws.String("ami-migrate-device"),
-							Value: device.DeviceName,
+			input := &ec2.CreateSnapshotInput{
+				VolumeId:    aws.String(volumeID),
+				Description: aws.String(fmt.Sprintf("Backup of volume %s from instance %s", volumeID, instanceID)),
+				TagSpecifications: []types.TagSpecification{
+					{
+						ResourceType: types.ResourceTypeSnapshot,
+						Tags: []types.Tag{
+							{
+								Key:   aws.String("Name"),
+								Value: aws.String(fmt.Sprintf("Backup-%s-%s", instanceID, time.Now().Format("2006-01-02"))),
+							},
+							{
+								Key:   aws.String("InstanceID"),
+								Value: aws.String(instanceID),
+							},
 						},
 					},
 				},
-			},
-		}
+			}
 
-		_, err := s.client.CreateSnapshot(ctx, input)
-		if err != nil {
-			s.tagInstanceStatus(ctx, instance, "failed", fmt.Sprintf("Failed to create snapshot: %v", err))
-			return fmt.Errorf("failed to create snapshot: %w", err)
+			_, err := s.client.CreateSnapshot(ctx, input)
+			if err != nil {
+				logger.Error("Failed to create snapshot", "instanceID", instanceID, "volumeID", volumeID, "error", err)
+				return fmt.Errorf("failed to create snapshot for volume %s: %v", volumeID, err)
+			}
+			logger.Info("Created snapshot for volume", "instanceID", instanceID, "volumeID", volumeID)
 		}
 	}
 
-	s.tagInstanceStatus(ctx, instance, "completed", "Volume snapshots created successfully")
+	logger.Info("Instance backup completed successfully", "instanceID", instanceID)
 	return nil
 }
 
@@ -1076,4 +1084,53 @@ func hasTag(tags []types.Tag, key, value string) bool {
 		}
 	}
 	return false
+}
+
+type waiterInterface interface {
+	Wait(ctx context.Context, params *ec2.DescribeInstancesInput, maxWaitDur time.Duration) error
+}
+
+type runningWaiter struct {
+	*ec2.InstanceRunningWaiter
+}
+
+func (w *runningWaiter) Wait(ctx context.Context, params *ec2.DescribeInstancesInput, maxWaitDur time.Duration) error {
+	return w.InstanceRunningWaiter.Wait(ctx, params, maxWaitDur)
+}
+
+type stoppedWaiter struct {
+	*ec2.InstanceStoppedWaiter
+}
+
+func (w *stoppedWaiter) Wait(ctx context.Context, params *ec2.DescribeInstancesInput, maxWaitDur time.Duration) error {
+	return w.InstanceStoppedWaiter.Wait(ctx, params, maxWaitDur)
+}
+
+type terminatedWaiter struct {
+	*ec2.InstanceTerminatedWaiter
+}
+
+func (w *terminatedWaiter) Wait(ctx context.Context, params *ec2.DescribeInstancesInput, maxWaitDur time.Duration) error {
+	return w.InstanceTerminatedWaiter.Wait(ctx, params, maxWaitDur)
+}
+
+func waitForInstanceState(ctx context.Context, instanceID string, desiredState types.InstanceStateName) error {
+	var waiter waiterInterface
+	switch desiredState {
+	case types.InstanceStateNameRunning:
+		waiter = &runningWaiter{ec2.NewInstanceRunningWaiter(client.GetEC2Client())}
+	case types.InstanceStateNameStopped:
+		waiter = &stoppedWaiter{ec2.NewInstanceStoppedWaiter(client.GetEC2Client())}
+	case types.InstanceStateNameTerminated:
+		waiter = &terminatedWaiter{ec2.NewInstanceTerminatedWaiter(client.GetEC2Client())}
+	default:
+		return fmt.Errorf("unsupported instance state: %s", desiredState)
+	}
+
+	maxWaitTime := config.GetTimeout()
+	logger.Debug("Waiting up to", maxWaitTime, "for instance", instanceID, "to reach state", desiredState)
+
+	return waiter.Wait(ctx, &ec2.DescribeInstancesInput{
+		InstanceIds: []string{instanceID},
+	}, maxWaitTime)
 }
