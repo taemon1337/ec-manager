@@ -23,7 +23,7 @@ var (
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
-	Use:   "ecman",
+	Use:   "ecman <action>",
 	Short: "EC2 instance management tool",
 	Long: `ec-manager (ecman) is a CLI tool that helps you manage your AWS EC2 instances.
 It provides commands for:
@@ -32,6 +32,41 @@ It provides commands for:
 - Migrating instances to new AMIs
 - Managing instance backups
 - Cleaning up unused instances`,
+	Run: func(cmd *cobra.Command, args []string) {
+		cmd.Help()
+	},
+	Args: cobra.MinimumNArgs(1),
+}
+
+// helpCmd represents the help command
+var helpCmd = &cobra.Command{
+	Use:   "help [command]",
+	Short: "Show help for a command",
+	Long: `Show detailed help and usage information for any command.
+If no command is specified, shows help for all commands.`,
+	Run: func(cmd *cobra.Command, args []string) {
+		if len(args) == 0 {
+			rootCmd.Help()
+			return
+		}
+		// Find the command
+		c, _, err := rootCmd.Find(args)
+		if err != nil {
+			fmt.Printf("Unknown command %q\n", args[0])
+			rootCmd.Help()
+			return
+		}
+		c.Help()
+	},
+	ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		var comps []string
+		for _, c := range rootCmd.Commands() {
+			if !c.Hidden {
+				comps = append(comps, c.Name())
+			}
+		}
+		return comps, cobra.ShellCompDirectiveNoFileComp
+	},
 }
 
 // Execute adds all child commands to the root command and sets flags appropriately.
@@ -40,6 +75,9 @@ func Execute() error {
 }
 
 func init() {
+	// Add help command
+	rootCmd.AddCommand(helpCmd)
+
 	// Add flags that are used by multiple commands
 	rootCmd.PersistentFlags().StringVar(&instanceID, "instance-id", "", "ID of the EC2 instance")
 	rootCmd.PersistentFlags().BoolVar(&enabled, "enabled", false, "Only process instances with ami-migrate=enabled tag")

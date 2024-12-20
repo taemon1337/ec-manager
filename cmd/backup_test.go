@@ -31,7 +31,6 @@ func TestBackupCmd(t *testing.T) {
 		instanceID = originalInstanceID
 		enabled = originalEnabled
 		logLevel = originalLogLevel
-		client.ResetClient()
 	})
 
 	// Initialize logger for tests with debug level

@@ -20,11 +20,6 @@ func TestGetAMIWithTag(t *testing.T) {
 	testutil.InitTestLogger(t)
 	logger.Init(logger.LogLevel("debug"))
 
-	// Ensure client is reset after test
-	t.Cleanup(func() {
-		client.ResetClient()
-	})
-
 	tests := []struct {
 		name        string
 		setupMock   func(*apitypes.MockEC2Client)
@@ -73,25 +68,24 @@ func TestGetAMIWithTag(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Create a new mock client
-			mockClient := apitypes.NewMockEC2Client()
+			// Create mock client
+			mockClient := &apitypes.MockEC2Client{
+				InstanceStates: make(map[string]types.InstanceStateName),
+			}
 			if tt.setupMock != nil {
 				tt.setupMock(mockClient)
 			}
 
-			// Set up mock client
-			client.SetEC2Client(mockClient)
-			t.Cleanup(func() {
-				client.ResetClient()
-			})
+			// Set mock client
+			if err := client.SetEC2Client(mockClient); err != nil {
+				t.Fatal(err)
+			}
 
 			// Create service with mock client
 			svc := NewService(mockClient)
 
-			// Execute test
-			ami, err := svc.GetAMIWithTag(context.Background(), tt.tagKey, tt.tagValue)
-
-			// Check results
+			// Run test
+			gotAMI, err := svc.GetAMIWithTag(context.Background(), tt.tagKey, tt.tagValue)
 			if tt.wantErr {
 				assert.Error(t, err)
 				if tt.errContains != "" {
@@ -99,7 +93,7 @@ func TestGetAMIWithTag(t *testing.T) {
 				}
 			} else {
 				assert.NoError(t, err)
-				assert.Equal(t, tt.wantAMI, ami)
+				assert.Equal(t, tt.wantAMI, gotAMI)
 			}
 		})
 	}
@@ -142,8 +136,10 @@ func TestTagAMI(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Create a new mock client
-			mockClient := apitypes.NewMockEC2Client()
+			// Create mock client
+			mockClient := &apitypes.MockEC2Client{
+				InstanceStates: make(map[string]types.InstanceStateName),
+			}
 			if tt.setupMock != nil {
 				tt.setupMock(mockClient)
 			}
@@ -151,10 +147,8 @@ func TestTagAMI(t *testing.T) {
 			// Create service with mock client
 			svc := NewService(mockClient)
 
-			// Execute test
+			// Run test
 			err := svc.TagAMI(context.Background(), tt.amiID, tt.tagKey, tt.tagValue)
-
-			// Check results
 			if tt.wantErr {
 				assert.Error(t, err)
 				if tt.errContains != "" {
@@ -290,25 +284,24 @@ func TestMigrateInstance(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Create a new mock client
-			mockClient := apitypes.NewMockEC2Client()
+			// Create mock client
+			mockClient := &apitypes.MockEC2Client{
+				InstanceStates: make(map[string]types.InstanceStateName),
+			}
 			if tt.setupMock != nil {
 				tt.setupMock(mockClient)
 			}
 
-			// Set up mock client
-			client.SetEC2Client(mockClient)
-			t.Cleanup(func() {
-				client.ResetClient()
-			})
+			// Set mock client
+			if err := client.SetEC2Client(mockClient); err != nil {
+				t.Fatal(err)
+			}
 
 			// Create service with mock client
 			svc := NewService(mockClient)
 
-			// Execute test
+			// Run test
 			err := svc.MigrateInstance(context.Background(), tt.instanceID, tt.newAMI)
-
-			// Check results
 			if tt.wantErr {
 				assert.Error(t, err)
 				if tt.errContains != "" {
@@ -371,8 +364,10 @@ func TestBackupInstance(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Create a new mock client
-			mockClient := apitypes.NewMockEC2Client()
+			// Create mock client
+			mockClient := &apitypes.MockEC2Client{
+				InstanceStates: make(map[string]types.InstanceStateName),
+			}
 			if tt.setupMock != nil {
 				tt.setupMock(mockClient)
 			}
@@ -380,10 +375,8 @@ func TestBackupInstance(t *testing.T) {
 			// Create service with mock client
 			svc := NewService(mockClient)
 
-			// Execute test
+			// Run test
 			err := svc.BackupInstance(context.Background(), tt.instanceID)
-
-			// Check results
 			if tt.wantErr {
 				assert.Error(t, err)
 				if tt.errContains != "" {
@@ -441,8 +434,10 @@ func TestListUserInstances(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Create a new mock client
-			mockClient := apitypes.NewMockEC2Client()
+			// Create mock client
+			mockClient := &apitypes.MockEC2Client{
+				InstanceStates: make(map[string]types.InstanceStateName),
+			}
 			if tt.setupMock != nil {
 				tt.setupMock(mockClient)
 			}
@@ -450,10 +445,8 @@ func TestListUserInstances(t *testing.T) {
 			// Create service with mock client
 			svc := NewService(mockClient)
 
-			// Execute test
+			// Run test
 			instances, err := svc.ListUserInstances(context.Background(), tt.userID)
-
-			// Check results
 			if tt.wantErr {
 				assert.Error(t, err)
 				if tt.errContains != "" {
@@ -538,8 +531,10 @@ func TestCreateInstance(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Create a new mock client
-			mockClient := apitypes.NewMockEC2Client()
+			// Create mock client
+			mockClient := &apitypes.MockEC2Client{
+				InstanceStates: make(map[string]types.InstanceStateName),
+			}
 			if tt.setupMock != nil {
 				tt.setupMock(mockClient)
 			}
@@ -547,10 +542,8 @@ func TestCreateInstance(t *testing.T) {
 			// Create service with mock client
 			svc := NewService(mockClient)
 
-			// Execute test
+			// Run test
 			instance, err := svc.CreateInstance(context.Background(), tt.config)
-
-			// Check results
 			if tt.wantErr {
 				assert.Error(t, err)
 				if tt.errContains != "" {
@@ -614,8 +607,10 @@ func TestDeleteInstance(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Create a new mock client
-			mockClient := apitypes.NewMockEC2Client()
+			// Create mock client
+			mockClient := &apitypes.MockEC2Client{
+				InstanceStates: make(map[string]types.InstanceStateName),
+			}
 			if tt.setupMock != nil {
 				tt.setupMock(mockClient)
 			}
@@ -623,10 +618,8 @@ func TestDeleteInstance(t *testing.T) {
 			// Create service with mock client
 			svc := NewService(mockClient)
 
-			// Execute test
+			// Run test
 			err := svc.DeleteInstance(context.Background(), tt.userID, tt.instanceID)
-
-			// Check results
 			if tt.wantErr {
 				assert.Error(t, err)
 				if tt.errContains != "" {
