@@ -5,6 +5,7 @@ GO_VERSION=1.21
 GOCACHE=${HOME}/.cache/go-build
 GOLANGCI=${HOME}/.cache/golangci-lint
 GOMODCACHE=${HOME}/.cache/go-mod
+GOSUMDB=${HOME}/.cache/go/sumdb
 SHELL=/bin/bash
 UID=$(shell id -u)
 GID=$(shell id -g)
@@ -26,6 +27,7 @@ DOCKER_RUN_OPTS=--rm \
 	-v $(GOLANGCI):/.cache/golangci-lint \
 	-v $(GOCACHE):/.cache/go-build \
 	-v $(GOMODCACHE):/go/pkg/mod \
+	-v $(GOSUMDB):/go/pkg/sumdb \
 	-w /app \
 	--user $(UID):$(GID)
 
@@ -73,7 +75,7 @@ test:
 	@echo "Running tests..."
 	docker run $(DOCKER_RUN_OPTS) \
 		golang:$(GO_VERSION)-alpine \
-		go test -v ./...
+		/bin/sh -c "go mod download && go test -v ./..."
 
 # Run linter
 lint:
@@ -93,14 +95,14 @@ docker-test:
 	@echo "Running tests in Docker..."
 	docker run $(DOCKER_RUN_OPTS) \
 		golang:$(GO_VERSION)-alpine \
-		/bin/sh -c "go test -v ./..."
+		/bin/sh -c "go mod download && go test -v ./..."
 
 # Run go mod tidy in Docker
 docker-tidy:
-	@echo "Running go mod tidy in Docker..."
-	docker run --rm -v $(PWD):/app -v $(HOME)/.cache/go-mod:/go/pkg/mod -v $(HOME)/.cache/go-build:/.cache/go-build -w /app --user $(shell id -u):$(shell id -g) \
-		golang:1.21-alpine \
-		/bin/sh -c "go get github.com/spf13/cobra && go mod tidy"
+	@echo "Running go mod tidy..."
+	docker run $(DOCKER_RUN_OPTS) \
+		golang:$(GO_VERSION)-alpine \
+		/bin/sh -c "go mod tidy"
 
 # Create go.mod if it doesn't exist
 init:

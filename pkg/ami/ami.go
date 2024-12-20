@@ -10,6 +10,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
+	apitypes "github.com/taemon1337/ami-migrate/pkg/types"
 )
 
 // EC2ClientAPI defines the AWS EC2 client interface
@@ -30,11 +31,11 @@ type EC2ClientAPI interface {
 
 // Service provides AMI management operations
 type Service struct {
-	client EC2ClientAPI
+	client apitypes.EC2ClientAPI
 }
 
 // NewService creates a new AMI service
-func NewService(client EC2ClientAPI) *Service {
+func NewService(client apitypes.EC2ClientAPI) *Service {
 	return &Service{
 		client: client,
 	}
@@ -97,9 +98,8 @@ func (s *Service) MigrateInstances(ctx context.Context, enabledValue string) err
 		wg.Add(1)
 		go func(inst types.Instance) {
 			defer wg.Done()
-			instanceID := aws.ToString(inst.InstanceId)
-			if err := s.MigrateInstance(ctx, instanceID); err != nil {
-				errChan <- fmt.Errorf("migrate instance %s: %w", instanceID, err)
+			if err := s.MigrateInstance(ctx, aws.ToString(inst.InstanceId)); err != nil {
+				errChan <- fmt.Errorf("migrate instance %s: %w", aws.ToString(inst.InstanceId), err)
 			}
 		}(instance)
 	}
@@ -440,15 +440,6 @@ func (s *Service) RestoreInstance(ctx context.Context, instanceID, snapshotID st
 	return nil
 }
 
-func hasTag(tags []types.Tag, key, value string) bool {
-	for _, tag := range tags {
-		if aws.ToString(tag.Key) == key && aws.ToString(tag.Value) == value {
-			return true
-		}
-	}
-	return false
-}
-
 func (s *Service) getInstances(ctx context.Context, enabledValue string) ([]types.Instance, error) {
 	input := &ec2.DescribeInstancesInput{
 		Filters: []types.Filter{
@@ -459,15 +450,16 @@ func (s *Service) getInstances(ctx context.Context, enabledValue string) ([]type
 		},
 	}
 
-	resp, err := s.client.DescribeInstances(ctx, input)
+	result, err := s.client.DescribeInstances(ctx, input)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("describe instances: %w", err)
 	}
 
 	var instances []types.Instance
-	for _, reservation := range resp.Reservations {
+	for _, reservation := range result.Reservations {
 		instances = append(instances, reservation.Instances...)
 	}
+
 	return instances, nil
 }
 
@@ -610,8 +602,6 @@ func (s *Service) getInstance(ctx context.Context, instanceID string) (types.Ins
 }
 
 func (s *Service) migrateInstanceToAMI(ctx context.Context, instance types.Instance, newAMI string) error {
-	instanceID := aws.ToString(instance.InstanceId)
-	
 	// Tag the instance to indicate migration is in progress
 	err := s.tagInstanceStatus(ctx, instance, "migrating", fmt.Sprintf("Migrating to AMI: %s", newAMI))
 	if err != nil {
@@ -692,6 +682,198 @@ func (s *Service) BackupInstance(ctx context.Context, instanceID string) error {
 	return nil
 }
 
+// InstanceConfig holds configuration for creating a new instance
+type InstanceConfig struct {
+	Name     string
+	OSType   string
+	Size     string
+	UserID   string
+}
+
+// InstanceSummary contains information about an instance
+type InstanceSummary struct {
+	InstanceID   string
+	Name         string
+	OSType       string
+	Size         string
+	State        string
+	LaunchTime   time.Time
+	PrivateIP    string
+	PublicIP     string
+	CurrentAMI   string
+	LatestAMI    string
+	NeedsMigrate bool
+}
+
+// ListUserInstances lists all instances owned by the user
+func (s *Service) ListUserInstances(ctx context.Context, userID string) ([]InstanceSummary, error) {
+	input := &ec2.DescribeInstancesInput{
+		Filters: []types.Filter{
+			{
+				Name:   aws.String("tag:Owner"),
+				Values: []string{userID},
+			},
+		},
+	}
+
+	result, err := s.client.DescribeInstances(ctx, input)
+	if err != nil {
+		return nil, fmt.Errorf("describe instances: %w", err)
+	}
+
+	var summaries []InstanceSummary
+	for _, reservation := range result.Reservations {
+		for _, instance := range reservation.Instances {
+			instanceID := aws.ToString(instance.InstanceId)
+			
+			// Get OS type
+			osType, err := s.GetInstanceOSType(ctx, instanceID)
+			if err != nil {
+				osType = "unknown"
+			}
+
+			// Get latest AMI
+			latestAMI, err := s.GetLatestAMI(ctx, osType)
+			if err != nil {
+				latestAMI = "unknown"
+			}
+
+			// Get instance name from tags
+			name := instanceID
+			for _, tag := range instance.Tags {
+				if aws.ToString(tag.Key) == "Name" {
+					name = aws.ToString(tag.Value)
+					break
+				}
+			}
+
+			summary := InstanceSummary{
+				InstanceID:   instanceID,
+				Name:         name,
+				OSType:       osType,
+				Size:         string(instance.InstanceType),
+				State:        string(instance.State.Name),
+				LaunchTime:   aws.ToTime(instance.LaunchTime),
+				PrivateIP:    aws.ToString(instance.PrivateIpAddress),
+				PublicIP:     aws.ToString(instance.PublicIpAddress),
+				CurrentAMI:   aws.ToString(instance.ImageId),
+				LatestAMI:    latestAMI,
+				NeedsMigrate: aws.ToString(instance.ImageId) != latestAMI,
+			}
+			summaries = append(summaries, summary)
+		}
+	}
+
+	return summaries, nil
+}
+
+// CreateInstance creates a new EC2 instance for the user
+func (s *Service) CreateInstance(ctx context.Context, config InstanceConfig) (*InstanceSummary, error) {
+	// Get the latest AMI for the OS type
+	amiID, err := s.GetLatestAMI(ctx, config.OSType)
+	if err != nil {
+		return nil, fmt.Errorf("get latest AMI: %w", err)
+	}
+
+	// Map size to instance type
+	instanceType, err := s.mapSizeToInstanceType(config.Size)
+	if err != nil {
+		return nil, err
+	}
+
+	// Create the instance
+	input := &ec2.RunInstancesInput{
+		ImageId:      aws.String(amiID),
+		InstanceType: instanceType,
+		MinCount:     aws.Int32(1),
+		MaxCount:     aws.Int32(1),
+		TagSpecifications: []types.TagSpecification{
+			{
+				ResourceType: types.ResourceTypeInstance,
+				Tags: []types.Tag{
+					{
+						Key:   aws.String("Name"),
+						Value: aws.String(config.Name),
+					},
+					{
+						Key:   aws.String("Owner"),
+						Value: aws.String(config.UserID),
+					},
+					{
+						Key:   aws.String("ami-migrate"),
+						Value: aws.String("enabled"),
+					},
+				},
+			},
+		},
+	}
+
+	result, err := s.client.RunInstances(ctx, input)
+	if err != nil {
+		return nil, fmt.Errorf("run instances: %w", err)
+	}
+
+	if len(result.Instances) == 0 {
+		return nil, fmt.Errorf("no instance created")
+	}
+
+	instance := result.Instances[0]
+	summary := InstanceSummary{
+		InstanceID:   aws.ToString(instance.InstanceId),
+		Name:         config.Name,
+		OSType:       config.OSType,
+		Size:         string(instance.InstanceType),
+		State:        string(instance.State.Name),
+		LaunchTime:   aws.ToTime(instance.LaunchTime),
+		PrivateIP:    aws.ToString(instance.PrivateIpAddress),
+		PublicIP:     aws.ToString(instance.PublicIpAddress),
+		CurrentAMI:   amiID,
+		LatestAMI:    amiID,
+		NeedsMigrate: false,
+	}
+
+	return &summary, nil
+}
+
+// mapSizeToInstanceType maps a friendly size name to an EC2 instance type
+func (s *Service) mapSizeToInstanceType(size string) (types.InstanceType, error) {
+	switch strings.ToLower(size) {
+	case "small":
+		return types.InstanceTypeT3Small, nil
+	case "medium":
+		return types.InstanceTypeT3Medium, nil
+	case "large":
+		return types.InstanceTypeT3Large, nil
+	case "xlarge":
+		return types.InstanceTypeT3Xlarge, nil
+	default:
+		return "", fmt.Errorf("invalid size: %s. Must be one of: small, medium, large, xlarge", size)
+	}
+}
+
+// FormatInstanceSummary returns a human-readable string of the instance summary
+func (s *InstanceSummary) FormatInstanceSummary() string {
+	var b strings.Builder
+
+	b.WriteString(fmt.Sprintf("Instance: %s (%s)\n", s.Name, s.InstanceID))
+	b.WriteString(fmt.Sprintf("  OS:           %s\n", s.OSType))
+	b.WriteString(fmt.Sprintf("  Size:         %s\n", s.Size))
+	b.WriteString(fmt.Sprintf("  State:        %s\n", s.State))
+	b.WriteString(fmt.Sprintf("  Launch Time:  %s\n", s.LaunchTime.Format(time.RFC3339)))
+	if s.PrivateIP != "" {
+		b.WriteString(fmt.Sprintf("  Private IP:   %s\n", s.PrivateIP))
+	}
+	if s.PublicIP != "" {
+		b.WriteString(fmt.Sprintf("  Public IP:    %s\n", s.PublicIP))
+	}
+	b.WriteString(fmt.Sprintf("  Current AMI:  %s\n", s.CurrentAMI))
+	if s.NeedsMigrate {
+		b.WriteString(fmt.Sprintf("  Latest AMI:   %s (migration available)\n", s.LatestAMI))
+	}
+
+	return b.String()
+}
+
 // CheckMigrationStatus checks if a user's instance needs migration
 func (s *Service) CheckMigrationStatus(ctx context.Context, userID string) (*MigrationStatus, error) {
 	// Find user's instance
@@ -750,7 +932,7 @@ func (s *Service) CheckMigrationStatus(ctx context.Context, userID string) (*Mig
 		CurrentAMIInfo:   currentAMIDetails,
 		LatestAMIInfo:    latestAMIDetails,
 		InstanceState:    string(instance.State.Name),
-		InstanceType:     aws.ToString(instance.InstanceType),
+		InstanceType:     string(instance.InstanceType),
 		LaunchTime:       aws.ToTime(instance.LaunchTime),
 		PrivateIP:        aws.ToString(instance.PrivateIpAddress),
 		PublicIP:         aws.ToString(instance.PublicIpAddress),
@@ -843,4 +1025,55 @@ func (s *MigrationStatus) FormatMigrationStatus() string {
 	}
 
 	return b.String()
+}
+
+// DeleteInstance deletes an instance owned by the user
+func (s *Service) DeleteInstance(ctx context.Context, userID, instanceID string) error {
+	// First verify the instance belongs to the user
+	input := &ec2.DescribeInstancesInput{
+		InstanceIds: []string{instanceID},
+		Filters: []types.Filter{
+			{
+				Name:   aws.String("tag:Owner"),
+				Values: []string{userID},
+			},
+		},
+	}
+
+	result, err := s.client.DescribeInstances(ctx, input)
+	if err != nil {
+		return fmt.Errorf("describe instance: %w", err)
+	}
+
+	if len(result.Reservations) == 0 || len(result.Reservations[0].Instances) == 0 {
+		return fmt.Errorf("instance %s not found or not owned by user %s", instanceID, userID)
+	}
+
+	instance := result.Reservations[0].Instances[0]
+
+	// Check if instance is already terminated
+	if instance.State != nil && instance.State.Name == types.InstanceStateNameTerminated {
+		return fmt.Errorf("instance %s is already terminated", instanceID)
+	}
+
+	// Terminate the instance
+	terminateInput := &ec2.TerminateInstancesInput{
+		InstanceIds: []string{instanceID},
+	}
+
+	_, err = s.client.TerminateInstances(ctx, terminateInput)
+	if err != nil {
+		return fmt.Errorf("terminate instance: %w", err)
+	}
+
+	return nil
+}
+
+func hasTag(tags []types.Tag, key, value string) bool {
+	for _, tag := range tags {
+		if aws.ToString(tag.Key) == key && aws.ToString(tag.Value) == value {
+			return true
+		}
+	}
+	return false
 }

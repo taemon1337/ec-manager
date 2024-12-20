@@ -9,148 +9,87 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
+	"github.com/stretchr/testify/assert"
+	"github.com/taemon1337/ami-migrate/pkg/client"
+	apitypes "github.com/taemon1337/ami-migrate/pkg/types"
 )
-
-type MockEC2Client struct {
-	describeImagesOutput    *ec2.DescribeImagesOutput
-	describeImagesError     error
-	describeInstancesOutput *ec2.DescribeInstancesOutput
-	describeInstancesError  error
-	createSnapshotOutput   *ec2.CreateSnapshotOutput
-	createSnapshotError    error
-	terminateInstancesOutput *ec2.TerminateInstancesOutput
-	terminateInstancesError  error
-	runInstancesOutput     *ec2.RunInstancesOutput
-	runInstancesError      error
-	createTagsError        error
-	stopInstancesOutput    *ec2.StopInstancesOutput
-	stopInstancesError     error
-	startInstancesOutput   *ec2.StartInstancesOutput
-	startInstancesError    error
-	attachVolumeOutput    *ec2.AttachVolumeOutput
-	attachVolumeError     error
-	createVolumeOutput    *ec2.CreateVolumeOutput
-	createVolumeError     error
-	describeSnapshotsOutput *ec2.DescribeSnapshotsOutput
-	describeSnapshotsError  error
-	describeVolumesOutput  *ec2.DescribeVolumesOutput
-	describeVolumesError   error
-}
-
-func (m *MockEC2Client) DescribeImages(ctx context.Context, params *ec2.DescribeImagesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeImagesOutput, error) {
-	return m.describeImagesOutput, m.describeImagesError
-}
-
-func (m *MockEC2Client) DescribeInstances(ctx context.Context, params *ec2.DescribeInstancesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
-	if m.describeInstancesError != nil {
-		return nil, m.describeInstancesError
-	}
-	return m.describeInstancesOutput, nil
-}
-
-func (m *MockEC2Client) CreateSnapshot(ctx context.Context, params *ec2.CreateSnapshotInput, optFns ...func(*ec2.Options)) (*ec2.CreateSnapshotOutput, error) {
-	return m.createSnapshotOutput, m.createSnapshotError
-}
-
-func (m *MockEC2Client) TerminateInstances(ctx context.Context, params *ec2.TerminateInstancesInput, optFns ...func(*ec2.Options)) (*ec2.TerminateInstancesOutput, error) {
-	return m.terminateInstancesOutput, m.terminateInstancesError
-}
-
-func (m *MockEC2Client) RunInstances(ctx context.Context, params *ec2.RunInstancesInput, optFns ...func(*ec2.Options)) (*ec2.RunInstancesOutput, error) {
-	return m.runInstancesOutput, m.runInstancesError
-}
-
-func (m *MockEC2Client) CreateTags(ctx context.Context, params *ec2.CreateTagsInput, optFns ...func(*ec2.Options)) (*ec2.CreateTagsOutput, error) {
-	return &ec2.CreateTagsOutput{}, m.createTagsError
-}
-
-func (m *MockEC2Client) StopInstances(ctx context.Context, params *ec2.StopInstancesInput, optFns ...func(*ec2.Options)) (*ec2.StopInstancesOutput, error) {
-	return m.stopInstancesOutput, m.stopInstancesError
-}
-
-func (m *MockEC2Client) StartInstances(ctx context.Context, params *ec2.StartInstancesInput, optFns ...func(*ec2.Options)) (*ec2.StartInstancesOutput, error) {
-	return m.startInstancesOutput, m.startInstancesError
-}
-
-func (m *MockEC2Client) AttachVolume(ctx context.Context, params *ec2.AttachVolumeInput, optFns ...func(*ec2.Options)) (*ec2.AttachVolumeOutput, error) {
-	return m.attachVolumeOutput, m.attachVolumeError
-}
-
-func (m *MockEC2Client) CreateVolume(ctx context.Context, params *ec2.CreateVolumeInput, optFns ...func(*ec2.Options)) (*ec2.CreateVolumeOutput, error) {
-	return m.createVolumeOutput, m.createVolumeError
-}
-
-func (m *MockEC2Client) DescribeSnapshots(ctx context.Context, params *ec2.DescribeSnapshotsInput, optFns ...func(*ec2.Options)) (*ec2.DescribeSnapshotsOutput, error) {
-	return m.describeSnapshotsOutput, m.describeSnapshotsError
-}
-
-func (m *MockEC2Client) DescribeVolumes(ctx context.Context, params *ec2.DescribeVolumesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeVolumesOutput, error) {
-	return m.describeVolumesOutput, m.describeVolumesError
-}
 
 func TestGetAMIWithTag(t *testing.T) {
 	tests := []struct {
-		name           string
-		mockOutput     *ec2.DescribeImagesOutput
-		mockError      error
-		expectedAMI    string
-		expectedError  bool
-		tagKey         string
-		tagValue       string
+		name        string
+		mockClient  *apitypes.MockEC2Client
+		tagKey      string
+		tagValue    string
+		wantAMI     string
+		wantErr     bool
+		errContains string
 	}{
 		{
-			name: "successful retrieval",
-			mockOutput: &ec2.DescribeImagesOutput{
-				Images: []types.Image{
-					{
-						ImageId: aws.String("ami-123"),
+			name: "found AMI with tag",
+			mockClient: &apitypes.MockEC2Client{
+				DescribeImagesOutput: &ec2.DescribeImagesOutput{
+					Images: []types.Image{
+						{
+							ImageId: aws.String("ami-123"),
+							Tags: []types.Tag{
+								{
+									Key:   aws.String("Status"),
+									Value: aws.String("latest"),
+								},
+							},
+						},
 					},
 				},
 			},
-			mockError:     nil,
-			expectedAMI:   "ami-123",
-			expectedError: false,
-			tagKey:       "Status",
-			tagValue:     "latest",
+			tagKey:   "Status",
+			tagValue: "latest",
+			wantAMI:  "ami-123",
+			wantErr:  false,
 		},
 		{
-			name:           "no images found",
-			mockOutput:     &ec2.DescribeImagesOutput{Images: []types.Image{}},
-			mockError:      nil,
-			expectedAMI:    "",
-			expectedError:  false,
-			tagKey:        "Status",
-			tagValue:      "latest",
+			name: "no AMI found",
+			mockClient: &apitypes.MockEC2Client{
+				DescribeImagesOutput: &ec2.DescribeImagesOutput{
+					Images: []types.Image{},
+				},
+			},
+			tagKey:      "Status",
+			tagValue:    "latest",
+			wantAMI:     "",
+			wantErr:     true,
+			errContains: "no AMI found",
 		},
 		{
-			name:           "aws error",
-			mockOutput:     nil,
-			mockError:      fmt.Errorf("AWS API error"),
-			expectedAMI:    "",
-			expectedError:  true,
-			tagKey:        "Status",
-			tagValue:      "latest",
+			name: "error describing images",
+			mockClient: &apitypes.MockEC2Client{
+				DescribeImagesError: fmt.Errorf("describe images error"),
+			},
+			tagKey:      "Status",
+			tagValue:    "latest",
+			wantAMI:     "",
+			wantErr:     true,
+			errContains: "describe images error",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mockClient := &MockEC2Client{
-				describeImagesOutput: tt.mockOutput,
-				describeImagesError:  tt.mockError,
-			}
+			// Reset client state before each test
+			client.ResetClient()
+			client.SetEC2Client(tt.mockClient)
+			defer client.ResetClient()
 
-			s := NewService(mockClient)
-			ami, err := s.GetAMIWithTag(context.Background(), tt.tagKey, tt.tagValue)
+			svc := NewService(tt.mockClient)
+			ami, err := svc.GetAMIWithTag(context.Background(), tt.tagKey, tt.tagValue)
 
-			if tt.expectedError && err == nil {
-				t.Error("expected error but got none")
-			}
-			if !tt.expectedError && err != nil {
-				t.Errorf("unexpected error: %v", err)
-			}
-			if ami != tt.expectedAMI {
-				t.Errorf("expected AMI %s but got %s", tt.expectedAMI, ami)
+			if tt.wantErr {
+				assert.Error(t, err)
+				if tt.errContains != "" {
+					assert.Contains(t, err.Error(), tt.errContains)
+				}
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tt.wantAMI, ami)
 			}
 		})
 	}
@@ -254,18 +193,18 @@ func TestMigrateInstances(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 
-			mockClient := &MockEC2Client{
-				describeInstancesOutput: &ec2.DescribeInstancesOutput{
+			mockClient := &apitypes.MockEC2Client{
+				DescribeInstancesOutput: &ec2.DescribeInstancesOutput{
 					Reservations: []types.Reservation{
 						{
 							Instances: tt.instances,
 						},
 					},
 				},
-				describeInstancesError:   tt.mockError,
-				createSnapshotOutput:     &ec2.CreateSnapshotOutput{SnapshotId: aws.String("snap-123")},
-				terminateInstancesOutput: &ec2.TerminateInstancesOutput{},
-				runInstancesOutput: &ec2.RunInstancesOutput{
+				DescribeInstancesError:   tt.mockError,
+				CreateSnapshotOutput:     &ec2.CreateSnapshotOutput{SnapshotId: aws.String("snap-123")},
+				TerminateInstancesOutput: &ec2.TerminateInstancesOutput{},
+				RunInstancesOutput: &ec2.RunInstancesOutput{
 					Instances: []types.Instance{
 						{
 							InstanceId: aws.String("i-new123"),
@@ -275,12 +214,17 @@ func TestMigrateInstances(t *testing.T) {
 						},
 					},
 				},
-				stopInstancesOutput:     &ec2.StopInstancesOutput{},
-				startInstancesOutput:    &ec2.StartInstancesOutput{},
+				StopInstancesOutput:     &ec2.StopInstancesOutput{},
+				StartInstancesOutput:    &ec2.StartInstancesOutput{},
 			}
 
+			// Reset client state before each test
+			client.ResetClient()
+			client.SetEC2Client(mockClient)
+			defer client.ResetClient()
+
 			s := NewService(mockClient)
-			err := s.MigrateInstances(ctx, "ami-old", "ami-new", "enabled")
+			err := s.MigrateInstances(ctx, "enabled")
 
 			if tt.expectedError && err == nil {
 				t.Error("expected error but got none")
@@ -321,9 +265,14 @@ func TestTagAMI(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mockClient := &MockEC2Client{
-				createTagsError: tt.mockError,
+			mockClient := &apitypes.MockEC2Client{
+				CreateTagsError: tt.mockError,
 			}
+
+			// Reset client state before each test
+			client.ResetClient()
+			client.SetEC2Client(mockClient)
+			defer client.ResetClient()
 
 			s := NewService(mockClient)
 			err := s.TagAMI(context.Background(), tt.amiID, tt.tagKey, tt.tagValue)
@@ -342,38 +291,48 @@ func TestMigrateInstance(t *testing.T) {
 	tests := []struct {
 		name          string
 		instanceID    string
-		oldAMI        string
-		newAMI        string
-		mockClient    *MockEC2Client
+		mockClient    *apitypes.MockEC2Client
 		expectedError bool
 	}{
 		{
 			name:       "successful_migration",
 			instanceID: "i-123",
-			oldAMI:     "ami-old",
-			newAMI:     "ami-new",
-			mockClient: &MockEC2Client{
-				describeInstancesOutput: &ec2.DescribeInstancesOutput{
+			mockClient: &apitypes.MockEC2Client{
+				DescribeInstancesOutput: &ec2.DescribeInstancesOutput{
 					Reservations: []types.Reservation{
 						{
 							Instances: []types.Instance{
 								{
-									InstanceId: aws.String("i-123"),
-									ImageId:    aws.String("ami-old"),
+									InstanceId:       aws.String("i-123"),
+									ImageId:          aws.String("ami-old"),
+									PlatformDetails: aws.String("Red Hat Enterprise Linux"),
+									InstanceType:    types.InstanceTypeT2Micro,
 									State: &types.InstanceState{
-										Name: types.InstanceStateNameStopped,
+										Name: types.InstanceStateNameRunning,
+									},
+									Tags: []types.Tag{
+										{
+											Key:   aws.String("Owner"),
+											Value: aws.String("testuser"),
+										},
 									},
 								},
 							},
 						},
 					},
 				},
-				stopInstancesOutput:  &ec2.StopInstancesOutput{},
-				startInstancesOutput: &ec2.StartInstancesOutput{},
-				runInstancesOutput: &ec2.RunInstancesOutput{
+				DescribeImagesOutput: &ec2.DescribeImagesOutput{
+					Images: []types.Image{
+						{
+							ImageId: aws.String("ami-new"),
+							Name:    aws.String("RHEL9"),
+						},
+					},
+				},
+				RunInstancesOutput: &ec2.RunInstancesOutput{
 					Instances: []types.Instance{
 						{
-							InstanceId: aws.String("i-new"),
+							InstanceId: aws.String("i-456"),
 						},
 					},
 				},
@@ -383,16 +342,19 @@ func TestMigrateInstance(t *testing.T) {
 		{
 			name:       "wrong_AMI",
 			instanceID: "i-123",
-			oldAMI:     "ami-old",
-			newAMI:     "ami-new",
-			mockClient: &MockEC2Client{
-				describeInstancesOutput: &ec2.DescribeInstancesOutput{
+			mockClient: &apitypes.MockEC2Client{
+				DescribeInstancesOutput: &ec2.DescribeInstancesOutput{
 					Reservations: []types.Reservation{
 						{
 							Instances: []types.Instance{
 								{
-									InstanceId: aws.String("i-123"),
-									ImageId:    aws.String("ami-different"),
+									InstanceId:       aws.String("i-123"),
+									ImageId:          aws.String("ami-different"),
+									PlatformDetails: aws.String("Red Hat Enterprise Linux"),
+									InstanceType:    types.InstanceTypeT2Micro,
+									State: &types.InstanceState{
+										Name: types.InstanceStateNameRunning,
+									},
 								},
 							},
 						},
@@ -404,10 +366,10 @@ func TestMigrateInstance(t *testing.T) {
 		{
 			name:       "instance_not_found",
 			instanceID: "i-123",
-			oldAMI:     "ami-old",
-			newAMI:     "ami-new",
-			mockClient: &MockEC2Client{
-				describeInstancesOutput: &ec2.DescribeInstancesOutput{},
+			mockClient: &apitypes.MockEC2Client{
+				DescribeInstancesOutput: &ec2.DescribeInstancesOutput{
+					Reservations: []types.Reservation{},
+				},
 			},
 			expectedError: true,
 		},
@@ -415,8 +377,13 @@ func TestMigrateInstance(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// Reset client state before each test
+			client.ResetClient()
+			client.SetEC2Client(tt.mockClient)
+			defer client.ResetClient()
+
 			svc := NewService(tt.mockClient)
-			err := svc.MigrateInstance(context.Background(), tt.instanceID, tt.oldAMI, tt.newAMI)
+			err := svc.MigrateInstance(context.Background(), tt.instanceID)
 			if tt.expectedError && err == nil {
 				t.Error("expected error but got none")
 			}
@@ -431,19 +398,24 @@ func TestBackupInstance(t *testing.T) {
 	tests := []struct {
 		name          string
 		instanceID    string
-		mockClient    *MockEC2Client
+		mockClient    *apitypes.MockEC2Client
 		expectedError bool
 	}{
 		{
 			name:       "successful_backup",
 			instanceID: "i-123",
-			mockClient: &MockEC2Client{
-				describeInstancesOutput: &ec2.DescribeInstancesOutput{
+			mockClient: &apitypes.MockEC2Client{
+				DescribeInstancesOutput: &ec2.DescribeInstancesOutput{
 					Reservations: []types.Reservation{
 						{
 							Instances: []types.Instance{
 								{
-									InstanceId: aws.String("i-123"),
+									InstanceId:       aws.String("i-123"),
+									PlatformDetails: aws.String("Red Hat Enterprise Linux"),
+									InstanceType:    types.InstanceTypeT2Micro,
+									State: &types.InstanceState{
+										Name: types.InstanceStateNameRunning,
+									},
 									BlockDeviceMappings: []types.InstanceBlockDeviceMapping{
 										{
 											DeviceName: aws.String("/dev/sda1"),
@@ -457,7 +429,7 @@ func TestBackupInstance(t *testing.T) {
 						},
 					},
 				},
-				createSnapshotOutput: &ec2.CreateSnapshotOutput{
+				CreateSnapshotOutput: &ec2.CreateSnapshotOutput{
 					SnapshotId: aws.String("snap-123"),
 				},
 			},
@@ -466,8 +438,8 @@ func TestBackupInstance(t *testing.T) {
 		{
 			name:       "instance_not_found",
 			instanceID: "i-123",
-			mockClient: &MockEC2Client{
-				describeInstancesOutput: &ec2.DescribeInstancesOutput{
+			mockClient: &apitypes.MockEC2Client{
+				DescribeInstancesOutput: &ec2.DescribeInstancesOutput{
 					Reservations: []types.Reservation{},
 				},
 			},
@@ -476,13 +448,18 @@ func TestBackupInstance(t *testing.T) {
 		{
 			name:       "snapshot_creation_fails",
 			instanceID: "i-123",
-			mockClient: &MockEC2Client{
-				describeInstancesOutput: &ec2.DescribeInstancesOutput{
+			mockClient: &apitypes.MockEC2Client{
+				DescribeInstancesOutput: &ec2.DescribeInstancesOutput{
 					Reservations: []types.Reservation{
 						{
 							Instances: []types.Instance{
 								{
-									InstanceId: aws.String("i-123"),
+									InstanceId:       aws.String("i-123"),
+									PlatformDetails: aws.String("Red Hat Enterprise Linux"),
+									InstanceType:    types.InstanceTypeT2Micro,
+									State: &types.InstanceState{
+										Name: types.InstanceStateNameRunning,
+									},
 									BlockDeviceMappings: []types.InstanceBlockDeviceMapping{
 										{
 											DeviceName: aws.String("/dev/sda1"),
@@ -496,7 +473,7 @@ func TestBackupInstance(t *testing.T) {
 						},
 					},
 				},
-				createSnapshotError: fmt.Errorf("failed to create snapshot"),
+				CreateSnapshotError: fmt.Errorf("failed to create snapshot"),
 			},
 			expectedError: true,
 		},
@@ -504,6 +481,11 @@ func TestBackupInstance(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// Reset client state before each test
+			client.ResetClient()
+			client.SetEC2Client(tt.mockClient)
+			defer client.ResetClient()
+
 			svc := NewService(tt.mockClient)
 			err := svc.BackupInstance(context.Background(), tt.instanceID)
 			if tt.expectedError && err == nil {
@@ -517,163 +499,427 @@ func TestBackupInstance(t *testing.T) {
 }
 
 func TestCheckMigrationStatus(t *testing.T) {
-	launchTime := time.Now().Add(-24 * time.Hour)
 	tests := []struct {
-		name              string
-		userID            string
-		instance          types.Instance
-		currentAMI        types.Image
-		latestAMI         types.Image
-		describeInstErr   error
-		describeImagesErr error
-		expectError       bool
-		expectMigration   bool
+		name          string
+		userID        string
+		mockClient    *apitypes.MockEC2Client
+		expectedError bool
 	}{
 		{
-			name:   "instance needs migration",
+			name:   "instance_needs_migration",
 			userID: "user123",
-			instance: types.Instance{
-				InstanceId:     aws.String("i-123"),
-				ImageId:        aws.String("ami-old"),
-				InstanceType:   types.InstanceTypeT2Micro,
-				State:         &types.InstanceState{Name: types.InstanceStateNameRunning},
-				LaunchTime:    aws.Time(launchTime),
-				PlatformDetails: aws.String("Red Hat Enterprise Linux"),
-				PrivateIpAddress: aws.String("10.0.0.1"),
-				PublicIpAddress:  aws.String("54.123.45.67"),
-				Tags: []types.Tag{
-					{Key: aws.String("Owner"), Value: aws.String("user123")},
+			mockClient: &apitypes.MockEC2Client{
+				DescribeInstancesOutput: &ec2.DescribeInstancesOutput{
+					Reservations: []types.Reservation{
+						{
+							Instances: []types.Instance{
+								{
+									InstanceId:       aws.String("i-123"),
+									PlatformDetails: aws.String("Red Hat Enterprise Linux"),
+									ImageId:          aws.String("ami-old"),
+									InstanceType:    types.InstanceTypeT2Micro,
+									State: &types.InstanceState{
+										Name: types.InstanceStateNameRunning,
+									},
+									Tags: []types.Tag{
+										{
+											Key:   aws.String("Owner"),
+											Value: aws.String("user123"),
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+				DescribeImagesOutput: &ec2.DescribeImagesOutput{
+					Images: []types.Image{
+						{
+							ImageId: aws.String("ami-new"),
+							Name:    aws.String("RHEL9"),
+						},
+					},
 				},
 			},
-			currentAMI: types.Image{
-				ImageId:      aws.String("ami-old"),
-				Name:        aws.String("RHEL-9.2-20231201"),
-				Description: aws.String("Red Hat Enterprise Linux 9.2"),
-				CreationDate: aws.String("2023-12-01T00:00:00Z"),
-			},
-			latestAMI: types.Image{
-				ImageId:      aws.String("ami-new"),
-				Name:        aws.String("RHEL-9.2-20231219"),
-				Description: aws.String("Red Hat Enterprise Linux 9.2"),
-				CreationDate: aws.String("2023-12-19T00:00:00Z"),
-				Tags: []types.Tag{
-					{Key: aws.String("ami-migrate"), Value: aws.String("latest")},
-				},
-			},
-			expectError:     false,
-			expectMigration: true,
+			expectedError: false,
 		},
 		{
-			name:   "instance up to date",
+			name:   "instance_up_to_date",
 			userID: "user123",
-			instance: types.Instance{
-				InstanceId:     aws.String("i-123"),
-				ImageId:        aws.String("ami-latest"),
-				InstanceType:   types.InstanceTypeT2Micro,
-				State:         &types.InstanceState{Name: types.InstanceStateNameRunning},
-				LaunchTime:    aws.Time(launchTime),
-				PlatformDetails: aws.String("Red Hat Enterprise Linux"),
-				PrivateIpAddress: aws.String("10.0.0.1"),
-				PublicIpAddress:  aws.String("54.123.45.67"),
-				Tags: []types.Tag{
-					{Key: aws.String("Owner"), Value: aws.String("user123")},
+			mockClient: &apitypes.MockEC2Client{
+				DescribeInstancesOutput: &ec2.DescribeInstancesOutput{
+					Reservations: []types.Reservation{
+						{
+							Instances: []types.Instance{
+								{
+									InstanceId:       aws.String("i-123"),
+									PlatformDetails: aws.String("Red Hat Enterprise Linux"),
+									ImageId:          aws.String("ami-new"),
+									InstanceType:    types.InstanceTypeT2Micro,
+									State: &types.InstanceState{
+										Name: types.InstanceStateNameRunning,
+									},
+									Tags: []types.Tag{
+										{
+											Key:   aws.String("Owner"),
+											Value: aws.String("user123"),
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+				DescribeImagesOutput: &ec2.DescribeImagesOutput{
+					Images: []types.Image{
+						{
+							ImageId: aws.String("ami-new"),
+							Name:    aws.String("RHEL9"),
+						},
+					},
 				},
 			},
-			currentAMI: types.Image{
-				ImageId:      aws.String("ami-latest"),
-				Name:        aws.String("RHEL-9.2-20231219"),
-				Description: aws.String("Red Hat Enterprise Linux 9.2"),
-				CreationDate: aws.String("2023-12-19T00:00:00Z"),
-				Tags: []types.Tag{
-					{Key: aws.String("ami-migrate"), Value: aws.String("latest")},
-				},
-			},
-			latestAMI: types.Image{
-				ImageId:      aws.String("ami-latest"),
-				Name:        aws.String("RHEL-9.2-20231219"),
-				Description: aws.String("Red Hat Enterprise Linux 9.2"),
-				CreationDate: aws.String("2023-12-19T00:00:00Z"),
-				Tags: []types.Tag{
-					{Key: aws.String("ami-migrate"), Value: aws.String("latest")},
-				},
-			},
-			expectError:     false,
-			expectMigration: false,
+			expectedError: false,
 		},
 		{
-			name:            "no instance found",
-			userID:         "user123",
-			describeInstErr: fmt.Errorf("no instances found"),
-			expectError:     true,
+			name:   "no_instance_found",
+			userID: "user123",
+			mockClient: &apitypes.MockEC2Client{
+				DescribeInstancesOutput: &ec2.DescribeInstancesOutput{
+					Reservations: []types.Reservation{},
+				},
+			},
+			expectedError: true,
 		},
 		{
-			name:   "ami lookup error",
+			name:   "ami_lookup_error",
 			userID: "user123",
-			instance: types.Instance{
-				InstanceId:     aws.String("i-123"),
-				ImageId:        aws.String("ami-old"),
-				PlatformDetails: aws.String("Red Hat Enterprise Linux"),
+			mockClient: &apitypes.MockEC2Client{
+				DescribeInstancesOutput: &ec2.DescribeInstancesOutput{
+					Reservations: []types.Reservation{
+						{
+							Instances: []types.Instance{
+								{
+									InstanceId:       aws.String("i-123"),
+									PlatformDetails: aws.String("Red Hat Enterprise Linux"),
+									ImageId:          aws.String("ami-old"),
+									InstanceType:    types.InstanceTypeT2Micro,
+									State: &types.InstanceState{
+										Name: types.InstanceStateNameRunning,
+									},
+									Tags: []types.Tag{
+										{
+											Key:   aws.String("Owner"),
+											Value: aws.String("user123"),
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+				DescribeImagesError: fmt.Errorf("failed to lookup AMI"),
 			},
-			describeImagesErr: fmt.Errorf("ami not found"),
-			expectError:       true,
+			expectedError: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mockClient := &MockEC2Client{}
+			// Reset client state before each test
+			client.ResetClient()
+			client.SetEC2Client(tt.mockClient)
+			defer client.ResetClient()
 
-			if tt.instance.InstanceId != nil {
-				mockClient.describeInstancesOutput = &ec2.DescribeInstancesOutput{
+			svc := NewService(tt.mockClient)
+			_, err := svc.CheckMigrationStatus(context.Background(), tt.userID)
+			if tt.expectedError && err == nil {
+				t.Error("expected error but got none")
+			}
+			if !tt.expectedError && err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+func TestListUserInstances(t *testing.T) {
+	tests := []struct {
+		name           string
+		userID         string
+		mockInstances  []types.Instance
+		expectedCount  int
+		expectedError  bool
+		mockError      error
+	}{
+		{
+			name:   "success with multiple instances",
+			userID: "testuser",
+			mockInstances: []types.Instance{
+				{
+					InstanceId:   aws.String("i-123"),
+					InstanceType: types.InstanceTypeT3Large,
+					State:       &types.InstanceState{Name: types.InstanceStateNameRunning},
+					LaunchTime:        aws.Time(time.Now()),
+					PrivateIpAddress: aws.String("10.0.0.1"),
+					PublicIpAddress:  aws.String("54.123.45.67"),
+					Tags: []types.Tag{
+						{Key: aws.String("Name"), Value: aws.String("test-1")},
+						{Key: aws.String("Owner"), Value: aws.String("testuser")},
+					},
+				},
+				{
+					InstanceId:   aws.String("i-456"),
+					InstanceType: types.InstanceTypeT3Xlarge,
+					State:       &types.InstanceState{Name: types.InstanceStateNameStopped},
+					LaunchTime:        aws.Time(time.Now()),
+					PrivateIpAddress: aws.String("10.0.0.2"),
+					PublicIpAddress:  aws.String("54.123.45.68"),
+					Tags: []types.Tag{
+						{Key: aws.String("Name"), Value: aws.String("test-2")},
+						{Key: aws.String("Owner"), Value: aws.String("testuser")},
+					},
+				},
+			},
+			expectedCount: 2,
+			expectedError: false,
+		},
+		{
+			name:           "success with no instances",
+			userID:         "testuser",
+			mockInstances:  []types.Instance{},
+			expectedCount:  0,
+			expectedError:  false,
+		},
+		{
+			name:           "aws error",
+			userID:         "testuser",
+			mockError:      fmt.Errorf("aws error"),
+			expectedError:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockEC2 := &apitypes.MockEC2Client{}
+			if tt.mockError != nil {
+				mockEC2.DescribeInstancesError = tt.mockError
+			} else {
+				mockEC2.DescribeInstancesOutput = &ec2.DescribeInstancesOutput{
 					Reservations: []types.Reservation{
 						{
-							Instances: []types.Instance{tt.instance},
+							Instances: tt.mockInstances,
 						},
 					},
 				}
 			}
-			mockClient.describeInstancesError = tt.describeInstErr
 
-			if tt.currentAMI.ImageId != nil {
-				mockClient.describeImagesOutput = &ec2.DescribeImagesOutput{
-					Images: []types.Image{tt.currentAMI},
-				}
-			}
-			if tt.latestAMI.ImageId != nil {
-				// For the second call to DescribeImages (for latest AMI)
-				mockClient.describeImagesOutput = &ec2.DescribeImagesOutput{
-					Images: []types.Image{tt.latestAMI},
-				}
-			}
-			mockClient.describeImagesError = tt.describeImagesErr
+			// Reset client state before each test
+			client.ResetClient()
+			client.SetEC2Client(mockEC2)
+			defer client.ResetClient()
 
-			s := NewService(mockClient)
-			status, err := s.CheckMigrationStatus(context.Background(), tt.userID)
+			service := &Service{client: mockEC2}
+			instances, err := service.ListUserInstances(context.Background(), tt.userID)
 
-			if tt.expectError {
-				if err == nil {
-					t.Error("expected error but got none")
-				}
+			if tt.expectedError {
+				assert.Error(t, err)
 				return
 			}
 
-			if err != nil {
+			assert.NoError(t, err)
+			assert.Equal(t, tt.expectedCount, len(instances))
+
+			if len(tt.mockInstances) > 0 {
+				assert.Equal(t, aws.ToString(tt.mockInstances[0].InstanceId), instances[0].InstanceID)
+			}
+		})
+	}
+}
+
+func TestCreateInstance(t *testing.T) {
+	tests := []struct {
+		name          string
+		config        InstanceConfig
+		mockInstance  types.Instance
+		expectedError bool
+		mockError     error
+	}{
+		{
+			name: "success ubuntu instance",
+			config: InstanceConfig{
+				Name:   "test-instance",
+				OSType: "Ubuntu",
+				Size:   "large",
+				UserID: "testuser",
+			},
+			mockInstance: types.Instance{
+				InstanceId:   aws.String("i-123"),
+				InstanceType: types.InstanceTypeT3Large,
+				State:       &types.InstanceState{Name: types.InstanceStateNamePending},
+				Tags: []types.Tag{
+					{Key: aws.String("Name"), Value: aws.String("test-instance")},
+					{Key: aws.String("Owner"), Value: aws.String("testuser")},
+				},
+			},
+			expectedError: false,
+		},
+		{
+			name: "invalid size",
+			config: InstanceConfig{
+				Name:   "test-instance",
+				OSType: "Ubuntu",
+				Size:   "invalid",
+				UserID: "testuser",
+			},
+			expectedError: true,
+		},
+		{
+			name: "aws error",
+			config: InstanceConfig{
+				Name:   "test-instance",
+				OSType: "Ubuntu",
+				Size:   "large",
+				UserID: "testuser",
+			},
+			mockError:     fmt.Errorf("aws error"),
+			expectedError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockEC2 := &apitypes.MockEC2Client{}
+			if tt.mockError != nil {
+				mockEC2.RunInstancesError = tt.mockError
+			} else {
+				mockEC2.RunInstancesOutput = &ec2.RunInstancesOutput{
+					Instances: []types.Instance{tt.mockInstance},
+				}
+			}
+
+			// Reset client state before each test
+			client.ResetClient()
+			client.SetEC2Client(mockEC2)
+			defer client.ResetClient()
+
+			service := &Service{client: mockEC2}
+			summary, err := service.CreateInstance(context.Background(), tt.config)
+
+			if tt.expectedError {
+				assert.Error(t, err)
+				return
+			}
+
+			assert.NoError(t, err)
+			assert.Equal(t, tt.config.Name, summary.Name)
+			assert.Equal(t, tt.config.OSType, summary.OSType)
+			assert.Equal(t, string(tt.mockInstance.InstanceType), summary.Size)
+		})
+	}
+}
+
+func TestDeleteInstance(t *testing.T) {
+	tests := []struct {
+		name          string
+		mockClient    *apitypes.MockEC2Client
+		userID        string
+		instanceID    string
+		expectedError bool
+	}{
+		{
+			name: "success",
+			mockClient: &apitypes.MockEC2Client{
+				DescribeInstancesOutput: &ec2.DescribeInstancesOutput{
+					Reservations: []types.Reservation{
+						{
+							Instances: []types.Instance{
+								{
+									InstanceId: aws.String("i-123"),
+									State: &types.InstanceState{
+										Name: types.InstanceStateNameRunning,
+									},
+									Tags: []types.Tag{
+										{
+											Key:   aws.String("Owner"),
+											Value: aws.String("testuser"),
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			userID:        "testuser",
+			instanceID:    "i-123",
+			expectedError: false,
+		},
+		{
+			name: "instance not found",
+			mockClient: &apitypes.MockEC2Client{
+				DescribeInstancesOutput: &ec2.DescribeInstancesOutput{
+					Reservations: []types.Reservation{},
+				},
+			},
+			userID:        "testuser",
+			instanceID:    "i-123",
+			expectedError: true,
+		},
+		{
+			name: "error describing instances",
+			mockClient: &apitypes.MockEC2Client{
+				DescribeInstancesError: fmt.Errorf("API error"),
+			},
+			userID:        "testuser",
+			instanceID:    "i-123",
+			expectedError: true,
+		},
+		{
+			name: "error terminating instance",
+			mockClient: &apitypes.MockEC2Client{
+				DescribeInstancesOutput: &ec2.DescribeInstancesOutput{
+					Reservations: []types.Reservation{
+						{
+							Instances: []types.Instance{
+								{
+									InstanceId: aws.String("i-123"),
+									State: &types.InstanceState{
+										Name: types.InstanceStateNameRunning,
+									},
+									Tags: []types.Tag{
+										{
+											Key:   aws.String("Owner"),
+											Value: aws.String("testuser"),
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+				TerminateInstancesError: fmt.Errorf("API error"),
+			},
+			userID:        "testuser",
+			instanceID:    "i-123",
+			expectedError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Reset client state before each test
+			client.ResetClient()
+			client.SetEC2Client(tt.mockClient)
+			defer client.ResetClient()
+
+			svc := NewService(tt.mockClient)
+			err := svc.DeleteInstance(context.Background(), tt.userID, tt.instanceID)
+			if tt.expectedError && err == nil {
+				t.Error("expected error but got none")
+			}
+			if !tt.expectedError && err != nil {
 				t.Errorf("unexpected error: %v", err)
-				return
-			}
-
-			if status.NeedsMigration != tt.expectMigration {
-				t.Errorf("expected NeedsMigration to be %v but got %v", tt.expectMigration, status.NeedsMigration)
-			}
-
-			if status.InstanceID != aws.ToString(tt.instance.InstanceId) {
-				t.Errorf("expected InstanceID %s but got %s", aws.ToString(tt.instance.InstanceId), status.InstanceID)
-			}
-
-			// Test formatting
-			formatted := status.FormatMigrationStatus()
-			if formatted == "" {
-				t.Error("FormatMigrationStatus returned empty string")
 			}
 		})
 	}

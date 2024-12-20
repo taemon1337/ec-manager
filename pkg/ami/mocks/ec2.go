@@ -20,6 +20,18 @@ type MockEC2Client struct {
 	TerminateInstancesError  error
 	RunInstancesOutput       *ec2.RunInstancesOutput
 	RunInstancesError        error
+	StopInstancesOutput      *ec2.StopInstancesOutput
+	StopInstancesError       error
+	StartInstancesOutput     *ec2.StartInstancesOutput
+	StartInstancesError      error
+	DescribeSnapshotsOutput  *ec2.DescribeSnapshotsOutput
+	DescribeSnapshotsError   error
+	CreateVolumeOutput       *ec2.CreateVolumeOutput
+	CreateVolumeError        error
+	DescribeVolumesOutput    *ec2.DescribeVolumesOutput
+	DescribeVolumesError     error
+	AttachVolumeOutput       *ec2.AttachVolumeOutput
+	AttachVolumeError        error
 }
 
 func (m *MockEC2Client) DescribeImages(ctx context.Context, params *ec2.DescribeImagesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeImagesOutput, error) {
@@ -44,4 +56,28 @@ func (m *MockEC2Client) TerminateInstances(ctx context.Context, params *ec2.Term
 
 func (m *MockEC2Client) RunInstances(ctx context.Context, params *ec2.RunInstancesInput, optFns ...func(*ec2.Options)) (*ec2.RunInstancesOutput, error) {
 	return m.RunInstancesOutput, m.RunInstancesError
+}
+
+func (m *MockEC2Client) StopInstances(ctx context.Context, params *ec2.StopInstancesInput, optFns ...func(*ec2.Options)) (*ec2.StopInstancesOutput, error) {
+	return m.StopInstancesOutput, m.StopInstancesError
+}
+
+func (m *MockEC2Client) StartInstances(ctx context.Context, params *ec2.StartInstancesInput, optFns ...func(*ec2.Options)) (*ec2.StartInstancesOutput, error) {
+	return m.StartInstancesOutput, m.StartInstancesError
+}
+
+func (m *MockEC2Client) DescribeSnapshots(ctx context.Context, params *ec2.DescribeSnapshotsInput, optFns ...func(*ec2.Options)) (*ec2.DescribeSnapshotsOutput, error) {
+	return m.DescribeSnapshotsOutput, m.DescribeSnapshotsError
+}
+
+func (m *MockEC2Client) CreateVolume(ctx context.Context, params *ec2.CreateVolumeInput, optFns ...func(*ec2.Options)) (*ec2.CreateVolumeOutput, error) {
+	return m.CreateVolumeOutput, m.CreateVolumeError
+}
+
+func (m *MockEC2Client) DescribeVolumes(ctx context.Context, params *ec2.DescribeVolumesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeVolumesOutput, error) {
+	return m.DescribeVolumesOutput, m.DescribeVolumesError
+}
+
+func (m *MockEC2Client) AttachVolume(ctx context.Context, params *ec2.AttachVolumeInput, optFns ...func(*ec2.Options)) (*ec2.AttachVolumeOutput, error) {
+	return m.AttachVolumeOutput, m.AttachVolumeError
 }
