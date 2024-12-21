@@ -26,12 +26,27 @@ func (e *ClientError) Error() string {
 	return e.Message
 }
 
+var (
+	ec2Client types.EC2ClientAPI
+	mockMode  bool
+)
+
+// SetMockMode enables or disables mock mode
+func SetMockMode(enabled bool) {
+	mockMode = enabled
+	if enabled {
+		ec2Client = types.NewMockEC2Client()
+	} else {
+		ec2Client = nil
+	}
+}
+
 // GetEC2Client returns an EC2 client for testing or real usage
 func GetEC2Client(ctx context.Context) (types.EC2ClientAPI, error) {
-	// Check if we're in a test package
-	if isTestPackage() {
+	// Check if we're in mock mode or test package
+	if mockMode || isTestPackage() {
 		if ec2Client == nil {
-			return nil, &ClientError{Message: "no EC2 client set for testing"}
+			return nil, &ClientError{Message: "no EC2 client set for mock mode"}
 		}
 		return ec2Client, nil
 	}
@@ -42,8 +57,7 @@ func GetEC2Client(ctx context.Context) (types.EC2ClientAPI, error) {
 		return nil, &ClientError{Message: "failed to load AWS config", Err: err}
 	}
 
-	ec2Client := ec2.NewFromConfig(cfg)
-	return ec2Client, nil
+	return ec2.NewFromConfig(cfg), nil
 }
 
 // LoadAWSConfig loads AWS configuration and validates credentials
@@ -102,8 +116,8 @@ Error details: %v`, awsConfigPath, err)
 
 // SetEC2Client sets the EC2 client (used for testing)
 func SetEC2Client(client types.EC2ClientAPI) error {
-	if !isTestPackage() {
-		return &ClientError{Message: "cannot set EC2 client outside of test package"}
+	if client == nil {
+		return &ClientError{Message: "cannot set nil EC2 client"}
 	}
 	ec2Client = client
 	return nil
@@ -111,7 +125,5 @@ func SetEC2Client(client types.EC2ClientAPI) error {
 
 // isTestPackage returns true if the code is running in a test package
 func isTestPackage() bool {
-	return strings.HasSuffix(os.Args[0], ".test")
+	return strings.HasSuffix(os.Args[0], ".test") || strings.Contains(os.Args[0], "/_test/")
 }
-
-var ec2Client types.EC2ClientAPI

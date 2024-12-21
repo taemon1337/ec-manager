@@ -31,6 +31,7 @@ Options:
   -instance-id string     ID of the instance to operate on
   -new-ami string        ID of the new AMI to migrate to (required for migrate)
   -snapshot-id string    ID of the snapshot to restore from (required for restore)
+  --mock                  Use mock EC2 client for testing
 
 Example:
   ec-manager migrate -enabled-value=enabled -timeout=15m
@@ -44,7 +45,15 @@ func main() {
 	rootCmd := &cobra.Command{
 		Use:   "ec-manager",
 		Short: "EC2 Manager",
+		PersistentPreRun: func(cmd *cobra.Command, args []string) {
+			// Get mock flag value and set mock mode
+			mock, _ := cmd.Flags().GetBool("mock")
+			client.SetMockMode(mock)
+		},
 	}
+
+	// Add persistent flags that apply to all commands
+	rootCmd.PersistentFlags().Bool("mock", false, "Use mock EC2 client for testing")
 
 	migrateCmd := &cobra.Command{
 		Use:   "migrate",
