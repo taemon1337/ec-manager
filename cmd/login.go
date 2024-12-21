@@ -33,6 +33,7 @@ type stsIdentityAPI interface {
 
 // Variables to allow mocking in tests
 var (
+	loadConfig = config.LoadDefaultConfig
 	newSTSClient = func(cfg aws.Config) STSAPI {
 		return sts.NewFromConfig(cfg)
 	}
@@ -113,15 +114,16 @@ func NewLoginCmd() *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "login",
-		Short: "Login to AWS and get temporary credentials",
-		Long: `Login to AWS and get temporary credentials using STS AssumeRole.
-The credentials will be stored in ~/.aws/credentials under the specified profile.`,
+		Use:           "login",
+		Short:         "Login to AWS and get temporary credentials",
+		Long:          `Login to AWS and get temporary credentials using STS AssumeRole. The credentials will be stored in ~/.aws/credentials under the specified profile.`,
+		SilenceUsage:  true,
+		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 
 			// Load the shared AWS configuration
-			cfg, err := config.LoadDefaultConfig(ctx)
+			cfg, err := loadConfig(ctx)
 			if err != nil {
 				return fmt.Errorf("unable to load AWS config: %w", err)
 			}
@@ -130,13 +132,13 @@ The credentials will be stored in ~/.aws/credentials under the specified profile
 			if listRoles {
 				roles, err := discoverRoleARN(ctx, cfg)
 				if err != nil {
-					fmt.Println(err.Error())
+					fmt.Fprintln(cmd.OutOrStderr(), err.Error())
 					return nil
 				}
 				
-				fmt.Println("Available roles:")
+				fmt.Fprintln(cmd.OutOrStdout(), "Available roles:")
 				for _, role := range roles {
-					fmt.Printf("- %s\n", role)
+					fmt.Fprintf(cmd.OutOrStdout(), "- %s\n", role)
 				}
 				return nil
 			}
@@ -145,7 +147,7 @@ The credentials will be stored in ~/.aws/credentials under the specified profile
 			if roleArn == "" {
 				roles, err := discoverRoleARN(ctx, cfg)
 				if err != nil {
-					fmt.Println(err.Error())
+					fmt.Fprintln(cmd.OutOrStderr(), err.Error())
 					return fmt.Errorf("--role-arn is required. Use --list-roles to see available roles")
 				}
 				
@@ -153,9 +155,9 @@ The credentials will be stored in ~/.aws/credentials under the specified profile
 					return fmt.Errorf("--role-arn is required and no roles were found")
 				}
 				
-				fmt.Println("Available roles:")
+				fmt.Fprintln(cmd.OutOrStdout(), "Available roles:")
 				for _, role := range roles {
-					fmt.Printf("- %s\n", role)
+					fmt.Fprintf(cmd.OutOrStdout(), "- %s\n", role)
 				}
 				return fmt.Errorf("--role-arn is required. Please select one of the roles above")
 			}
@@ -222,8 +224,8 @@ The credentials will be stored in ~/.aws/credentials under the specified profile
 				return fmt.Errorf("failed to save credentials file: %w", err)
 			}
 
-			fmt.Printf("Successfully logged in. Temporary credentials saved to profile '%s'\n", profile)
-			fmt.Printf("Credentials will expire at: %v\n", result.Credentials.Expiration)
+			fmt.Fprintf(cmd.OutOrStdout(), "Successfully logged in. Temporary credentials saved to profile '%s'\n", profile)
+			fmt.Fprintf(cmd.OutOrStdout(), "Credentials will expire at: %v\n", result.Credentials.Expiration)
 
 			return nil
 		},

@@ -157,6 +157,7 @@ func TestMigrateCmd(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create command
 			cmd := NewMigrateCmd()
+			cmd.SilenceUsage = true
 			if tt.setupCmd != nil {
 				tt.setupCmd(cmd)
 			}

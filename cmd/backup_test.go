@@ -174,6 +174,7 @@ func TestBackupCmd(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Set up test command
 			cmd, _ := setupTest("backup", tt.setupMock)
+			cmd.SilenceUsage = true
 
 			// Add backup-specific flags
 			cmd.PreRunE = func(cmd *cobra.Command, args []string) error {

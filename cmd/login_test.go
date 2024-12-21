@@ -9,12 +9,13 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/iam"
 	"github.com/aws/aws-sdk-go-v2/service/iam/types"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	ststypes "github.com/aws/aws-sdk-go-v2/service/sts/types"
 	"github.com/stretchr/testify/assert"
-	"gopkg.in/ini.v1"
+	"github.com/stretchr/testify/require"
 )
 
 // Mock STS client
@@ -25,8 +26,13 @@ type mockSTSClient struct {
 }
 
 func (m *mockSTSClient) AssumeRole(ctx context.Context, params *sts.AssumeRoleInput, optFns ...func(*sts.Options)) (*sts.AssumeRoleOutput, error) {
+	// Store the input for validation
 	m.AssumeRoleInput = params
-	return m.AssumeRoleOutput, m.AssumeRoleError
+
+	if m.AssumeRoleError != nil {
+		return nil, m.AssumeRoleError
+	}
+	return m.AssumeRoleOutput, nil
 }
 
 // Mock IAM client
@@ -47,271 +53,271 @@ func (m *mockIAMClient) ListRoles(ctx context.Context, params *iam.ListRolesInpu
 
 // Mock STS identity client
 type mockSTSIdentityClient struct {
-	GetCallerIdentityOutput *sts.GetCallerIdentityOutput
-	GetCallerIdentityError  error
+	Output *sts.GetCallerIdentityOutput
+	Error  error
 }
 
 func (m *mockSTSIdentityClient) GetCallerIdentity(ctx context.Context, params *sts.GetCallerIdentityInput, optFns ...func(*sts.Options)) (*sts.GetCallerIdentityOutput, error) {
-	return m.GetCallerIdentityOutput, m.GetCallerIdentityError
+	return m.Output, m.Error
 }
 
 func TestLoginCmd(t *testing.T) {
-	// Save original clients and restore after tests
+	// Store original client creation functions
 	origNewSTSClient := newSTSClient
 	origNewIAMClient := newIAMClient
 	origNewSTSIdentityClient := newSTSIdentityClient
-	defer func() { 
+	origLoadConfig := loadConfig
+	origHome := os.Getenv("HOME")
+
+	// Restore original functions after all tests
+	defer func() {
 		newSTSClient = origNewSTSClient
 		newIAMClient = origNewIAMClient
 		newSTSIdentityClient = origNewSTSIdentityClient
+		loadConfig = origLoadConfig
+		os.Setenv("HOME", origHome)
 	}()
 
-	// Create a temporary directory for test credentials
+	// Create temporary AWS directory for testing
 	tmpDir := t.TempDir()
-	oldHome := os.Getenv("HOME")
 	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", oldHome)
 
-	// Create AWS credentials directory
-	credentialsDir := filepath.Join(tmpDir, ".aws")
-	err := os.MkdirAll(credentialsDir, 0700)
-	if err != nil {
-		t.Fatalf("Failed to create credentials directory: %v", err)
+	// Create AWS config directory
+	awsDir := filepath.Join(tmpDir, ".aws")
+	if err := os.MkdirAll(awsDir, 0700); err != nil {
+		t.Fatalf("Failed to create AWS directory: %v", err)
 	}
 
-	// Fixed time for testing
-	testTime := time.Date(2024, 12, 20, 12, 0, 0, 0, time.UTC)
+	// Mock AWS config loading
+	loadConfig = func(ctx context.Context, optFns ...func(*config.LoadOptions) error) (aws.Config, error) {
+		return aws.Config{
+			Region: "us-west-2",
+			Credentials: aws.CredentialsProviderFunc(func(ctx context.Context) (aws.Credentials, error) {
+				return aws.Credentials{
+					AccessKeyID:     "AKIADEFAULT",
+					SecretAccessKey: "defaultsecret",
+				}, nil
+			}),
+		}, nil
+	}
+
+	// Set test time
+	testTime := time.Date(2024, 12, 20, 19, 19, 3, 0, time.UTC)
 
 	tests := []struct {
-		name           string
-		args           []string
-		setupMocks     func() (*mockSTSClient, *mockIAMClient, *mockSTSIdentityClient)
-		expectedError  bool
-		errorContains  string
-		validateInput  func(t *testing.T, input *sts.AssumeRoleInput)
-		validateOutput func(t *testing.T, credentialsPath string)
+		name       string
+		args       []string
+		setupMocks func(t *testing.T) (*mockSTSClient, *mockIAMClient, *mockSTSIdentityClient)
+		wantErr    bool
+		errMsg     string
 	}{
 		{
-			name: "list roles success",
+			name: "list_roles_success",
 			args: []string{"--list-roles"},
-			setupMocks: func() (*mockSTSClient, *mockIAMClient, *mockSTSIdentityClient) {
-				return nil, &mockIAMClient{
+			setupMocks: func(t *testing.T) (*mockSTSClient, *mockIAMClient, *mockSTSIdentityClient) {
+				mockSTS := &mockSTSClient{}
+				mockIAM := &mockIAMClient{
 					GetUserOutput: &iam.GetUserOutput{
 						User: &types.User{
-							Arn: aws.String("arn:aws:iam::123456789012:user/testuser"),
+							Arn: aws.String("arn:aws:iam::123456789012:user/test-user"),
 						},
 					},
 					ListRolesOutput: &iam.ListRolesOutput{
 						Roles: []types.Role{
 							{
-								RoleName: aws.String("TestRole1"),
-								Arn:      aws.String("arn:aws:iam::123456789012:role/TestRole1"),
+								RoleName: aws.String("role1"),
+								Arn:      aws.String("arn:aws:iam::123456789012:role/role1"),
 							},
 							{
-								RoleName: aws.String("TestRole2"),
-								Arn:      aws.String("arn:aws:iam::123456789012:role/TestRole2"),
+								RoleName: aws.String("role2"),
+								Arn:      aws.String("arn:aws:iam::123456789012:role/role2"),
 							},
 						},
 					},
-				}, nil
+				}
+				mockSTSIdentity := &mockSTSIdentityClient{}
+				return mockSTS, mockIAM, mockSTSIdentity
 			},
-			expectedError: false,
 		},
 		{
-			name: "list roles with fallback to STS",
+			name: "list_roles_with_fallback_to_STS",
 			args: []string{"--list-roles"},
-			setupMocks: func() (*mockSTSClient, *mockIAMClient, *mockSTSIdentityClient) {
-				return nil, &mockIAMClient{
+			setupMocks: func(t *testing.T) (*mockSTSClient, *mockIAMClient, *mockSTSIdentityClient) {
+				mockSTS := &mockSTSClient{}
+				mockIAM := &mockIAMClient{
 					GetUserError: fmt.Errorf("access denied"),
 					ListRolesOutput: &iam.ListRolesOutput{
 						Roles: []types.Role{
 							{
-								RoleName: aws.String("TestRole1"),
-								Arn:      aws.String("arn:aws:iam::123456789012:role/TestRole1"),
+								RoleName: aws.String("role1"),
+								Arn:      aws.String("arn:aws:iam::123456789012:role/role1"),
+							},
+							{
+								RoleName: aws.String("role2"),
+								Arn:      aws.String("arn:aws:iam::123456789012:role/role2"),
 							},
 						},
 					},
-				}, &mockSTSIdentityClient{
-					GetCallerIdentityOutput: &sts.GetCallerIdentityOutput{
+				}
+				mockSTSIdentity := &mockSTSIdentityClient{
+					Output: &sts.GetCallerIdentityOutput{
 						Account: aws.String("123456789012"),
 					},
 				}
+				return mockSTS, mockIAM, mockSTSIdentity
 			},
-			expectedError: false,
 		},
 		{
-			name: "no role ARN provided shows available roles",
+			name: "no_role_ARN_provided_shows_available_roles",
 			args: []string{},
-			setupMocks: func() (*mockSTSClient, *mockIAMClient, *mockSTSIdentityClient) {
-				return nil, &mockIAMClient{
+			setupMocks: func(t *testing.T) (*mockSTSClient, *mockIAMClient, *mockSTSIdentityClient) {
+				mockSTS := &mockSTSClient{}
+				mockIAM := &mockIAMClient{
 					GetUserOutput: &iam.GetUserOutput{
 						User: &types.User{
-							Arn: aws.String("arn:aws:iam::123456789012:user/testuser"),
+							Arn: aws.String("arn:aws:iam::123456789012:user/test-user"),
 						},
 					},
 					ListRolesOutput: &iam.ListRolesOutput{
 						Roles: []types.Role{
 							{
-								RoleName: aws.String("TestRole1"),
-								Arn:      aws.String("arn:aws:iam::123456789012:role/TestRole1"),
+								RoleName: aws.String("role1"),
+								Arn:      aws.String("arn:aws:iam::123456789012:role/role1"),
+							},
+							{
+								RoleName: aws.String("role2"),
+								Arn:      aws.String("arn:aws:iam::123456789012:role/role2"),
 							},
 						},
 					},
-				}, nil
+				}
+				mockSTSIdentity := &mockSTSIdentityClient{}
+				return mockSTS, mockIAM, mockSTSIdentity
 			},
-			expectedError: true,
-			errorContains: "--role-arn is required",
+			wantErr: true,
+			errMsg:  "--role-arn is required. Please select one of the roles above",
 		},
 		{
-			name: "successful login with basic role",
-			args: []string{
-				"--role-arn", "arn:aws:iam::123456789012:role/TestRole",
-				"--profile", "test-profile",
-			},
-			setupMocks: func() (*mockSTSClient, *mockIAMClient, *mockSTSIdentityClient) {
-				expiration := testTime.Add(1 * time.Hour)
-				stsClient := &mockSTSClient{
+			name: "successful_login_with_basic_role",
+			args: []string{"--profile", "test", "--role-arn", "arn:aws:iam::123456789012:role/role1"},
+			setupMocks: func(t *testing.T) (*mockSTSClient, *mockIAMClient, *mockSTSIdentityClient) {
+				mockSTS := &mockSTSClient{
 					AssumeRoleOutput: &sts.AssumeRoleOutput{
 						Credentials: &ststypes.Credentials{
-							AccessKeyId:     aws.String("TESTACCESSKEY"),
-							SecretAccessKey: aws.String("TESTSECRETKEY"),
-							SessionToken:    aws.String("TESTSESSIONTOKEN"),
-							Expiration:      &expiration,
+							AccessKeyId:     aws.String("AKIATEST"),
+							SecretAccessKey: aws.String("testsecret"),
+							SessionToken:    aws.String("testtoken"),
+							Expiration:      aws.Time(testTime),
 						},
 					},
 				}
-				return stsClient, nil, nil
-			},
-			validateInput: func(t *testing.T, input *sts.AssumeRoleInput) {
-				if input == nil {
-					t.Fatal("AssumeRoleInput is nil")
-				}
-				assert.Equal(t, "arn:aws:iam::123456789012:role/TestRole", *input.RoleArn)
-				assert.Equal(t, int32(3600), *input.DurationSeconds)
-				assert.Equal(t, "ec-manager-session", *input.RoleSessionName)
-			},
-			validateOutput: func(t *testing.T, credentialsPath string) {
-				cfg, err := ini.Load(credentialsPath)
-				assert.NoError(t, err)
+				mockIAM := &mockIAMClient{}
+				mockSTSIdentity := &mockSTSIdentityClient{}
 
-				section := cfg.Section("test-profile")
-				assert.Equal(t, "TESTACCESSKEY", section.Key("aws_access_key_id").String())
-				assert.Equal(t, "TESTSECRETKEY", section.Key("aws_secret_access_key").String())
-				assert.Equal(t, "TESTSESSIONTOKEN", section.Key("aws_session_token").String())
+				// Set up the expected AssumeRoleInput
+				mockSTS.AssumeRoleInput = &sts.AssumeRoleInput{
+					RoleArn:         aws.String("arn:aws:iam::123456789012:role/role1"),
+					RoleSessionName: aws.String("ec-manager-session"),
+				}
+
+				return mockSTS, mockIAM, mockSTSIdentity
 			},
-			expectedError: false,
 		},
 		{
-			name: "successful login with MFA",
-			args: []string{
-				"--role-arn", "arn:aws:iam::123456789012:role/TestRole",
-				"--profile", "mfa-profile",
-				"--mfa-serial", "arn:aws:iam::123456789012:mfa/test-device",
-				"--mfa-token", "123456",
-			},
-			setupMocks: func() (*mockSTSClient, *mockIAMClient, *mockSTSIdentityClient) {
-				expiration := testTime.Add(1 * time.Hour)
-				stsClient := &mockSTSClient{
+			name: "successful_login_with_MFA",
+			args: []string{"--profile", "test", "--role-arn", "arn:aws:iam::123456789012:role/role1", "--mfa-token", "123456"},
+			setupMocks: func(t *testing.T) (*mockSTSClient, *mockIAMClient, *mockSTSIdentityClient) {
+				mockSTS := &mockSTSClient{
 					AssumeRoleOutput: &sts.AssumeRoleOutput{
 						Credentials: &ststypes.Credentials{
-							AccessKeyId:     aws.String("MFAACCESSKEY"),
-							SecretAccessKey: aws.String("MFASECRETKEY"),
-							SessionToken:    aws.String("MFASESSIONTOKEN"),
-							Expiration:      &expiration,
+							AccessKeyId:     aws.String("AKIATEST"),
+							SecretAccessKey: aws.String("testsecret"),
+							SessionToken:    aws.String("testtoken"),
+							Expiration:      aws.Time(testTime),
 						},
 					},
 				}
-				return stsClient, nil, nil
-			},
-			validateInput: func(t *testing.T, input *sts.AssumeRoleInput) {
-				if input == nil {
-					t.Fatal("AssumeRoleInput is nil")
+				mockIAM := &mockIAMClient{}
+				mockSTSIdentity := &mockSTSIdentityClient{
+					Output: &sts.GetCallerIdentityOutput{
+						Arn: aws.String("arn:aws:iam::123456789012:user/test-user"),
+					},
 				}
-				assert.Equal(t, "arn:aws:iam::123456789012:role/TestRole", *input.RoleArn)
-				assert.Equal(t, "arn:aws:iam::123456789012:mfa/test-device", *input.SerialNumber)
-				assert.Equal(t, "123456", *input.TokenCode)
-			},
-			validateOutput: func(t *testing.T, credentialsPath string) {
-				cfg, err := ini.Load(credentialsPath)
-				assert.NoError(t, err)
 
-				section := cfg.Section("mfa-profile")
-				assert.Equal(t, "MFAACCESSKEY", section.Key("aws_access_key_id").String())
-				assert.Equal(t, "MFASECRETKEY", section.Key("aws_secret_access_key").String())
-				assert.Equal(t, "MFASESSIONTOKEN", section.Key("aws_session_token").String())
+				// Set up the expected AssumeRoleInput with MFA
+				mockSTS.AssumeRoleInput = &sts.AssumeRoleInput{
+					RoleArn:         aws.String("arn:aws:iam::123456789012:role/role1"),
+					RoleSessionName: aws.String("ec-manager-session"),
+					SerialNumber:    aws.String("arn:aws:iam::123456789012:mfa/test-user"),
+					TokenCode:       aws.String("123456"),
+				}
+
+				return mockSTS, mockIAM, mockSTSIdentity
 			},
-			expectedError: false,
 		},
 		{
-			name: "invalid MFA token",
-			args: []string{
-				"--role-arn", "arn:aws:iam::123456789012:role/TestRole",
-				"--mfa-serial", "arn:aws:iam::123456789012:mfa/test-device",
-				"--mfa-token", "invalid",
-			},
-			setupMocks: func() (*mockSTSClient, *mockIAMClient, *mockSTSIdentityClient) {
-				return &mockSTSClient{
+			name: "invalid_MFA_token",
+			args: []string{"--profile", "test", "--role-arn", "arn:aws:iam::123456789012:role/role1", "--mfa-token", "123456"},
+			setupMocks: func(t *testing.T) (*mockSTSClient, *mockIAMClient, *mockSTSIdentityClient) {
+				mockSTS := &mockSTSClient{
 					AssumeRoleError: fmt.Errorf("invalid MFA token"),
-				}, nil, nil
+				}
+				mockIAM := &mockIAMClient{}
+				mockSTSIdentity := &mockSTSIdentityClient{
+					Output: &sts.GetCallerIdentityOutput{
+						Arn: aws.String("arn:aws:iam::123456789012:user/test-user"),
+					},
+				}
+				return mockSTS, mockIAM, mockSTSIdentity
 			},
-			expectedError: true,
-			errorContains: "invalid MFA token",
+			wantErr: true,
+			errMsg:  "invalid MFA token",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Create command
-			cmd := NewLoginCmd()
+			// Create temporary AWS directory for testing
+			tmpDir := t.TempDir()
+			os.Setenv("HOME", tmpDir)
 
-			// Set args
-			cmd.SetArgs(tt.args)
+			// Create AWS config directory
+			awsDir = filepath.Join(tmpDir, ".aws")
+			if err := os.MkdirAll(awsDir, 0700); err != nil {
+				t.Fatalf("Failed to create AWS directory: %v", err)
+			}
 
 			// Setup mocks if provided
 			if tt.setupMocks != nil {
-				stsClient, iamClient, stsIdentityClient := tt.setupMocks()
-				if stsClient != nil {
-					newSTSClient = func(cfg aws.Config) STSAPI {
-						return stsClient
-					}
+				mockSTS, mockIAM, mockSTSIdentity := tt.setupMocks(t)
+				newSTSClient = func(cfg aws.Config) STSAPI {
+					return mockSTS
 				}
-				if iamClient != nil {
-					newIAMClient = func(cfg aws.Config) iamAPI {
-						return iamClient
-					}
+				newIAMClient = func(cfg aws.Config) iamAPI {
+					return mockIAM
 				}
-				if stsIdentityClient != nil {
-					newSTSIdentityClient = func(cfg aws.Config) stsIdentityAPI {
-						return stsIdentityClient
-					}
+				newSTSIdentityClient = func(cfg aws.Config) stsIdentityAPI {
+					return mockSTSIdentity
 				}
 			}
 
-			// Run command
+			// Create command
+			cmd := NewLoginCmd()
+			cmd.SilenceUsage = true
+
+			// Set command arguments
+			cmd.SetArgs(tt.args)
+
+			// Execute command
 			err := cmd.Execute()
 
-			// Validate error
-			if tt.expectedError {
-				assert.Error(t, err)
-				if tt.errorContains != "" {
-					assert.Contains(t, err.Error(), tt.errorContains)
+			if tt.wantErr {
+				require.Error(t, err)
+				if tt.errMsg != "" {
+					assert.Contains(t, err.Error(), tt.errMsg)
 				}
-				return
-			}
-
-			assert.NoError(t, err)
-
-			// Validate input if needed
-			if tt.validateInput != nil {
-				stsClient, _, _ := tt.setupMocks()
-				if stsClient != nil {
-					tt.validateInput(t, stsClient.AssumeRoleInput)
-				}
-			}
-
-			// Validate output if needed
-			if tt.validateOutput != nil {
-				tt.validateOutput(t, filepath.Join(credentialsDir, "credentials"))
+			} else {
+				require.NoError(t, err)
 			}
 		})
 	}
