@@ -63,6 +63,9 @@ It provides commands for:
 		}
 		if mock {
 			client.SetMockMode(true)
+			// Set up default mock client
+			mockClient := client.NewMockEC2Client()
+			client.SetMockClient(mockClient)
 		}
 		return nil
 	},
@@ -139,6 +142,12 @@ func getUserID(cmd *cobra.Command) (string, error) {
 	// If user flag is set, use it
 	if user != "" {
 		return user, nil
+	}
+
+	// If in mock mode, return a default user
+	mock, _ := cmd.Flags().GetBool("mock")
+	if mock {
+		return "mock-user", nil
 	}
 
 	// Try to get user from AWS credentials

@@ -2,6 +2,7 @@ package types
 
 import (
 	"context"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 )
@@ -146,4 +147,49 @@ func (m *MockEC2Client) DescribeVolumes(ctx context.Context, params *ec2.Describ
 		return m.DescribeVolumesFunc(ctx, params, optFns...)
 	}
 	return m.DescribeVolumesOutput, nil
+}
+
+// MockInstanceRunningWaiter is a mock implementation of instance running waiter
+type MockInstanceRunningWaiter struct {
+	*ec2.InstanceRunningWaiter
+}
+
+// Wait implements waiter interface
+func (m *MockInstanceRunningWaiter) Wait(ctx context.Context, params *ec2.DescribeInstancesInput, maxWaitDur time.Duration) error {
+	return nil
+}
+
+// MockInstanceStoppedWaiter is a mock implementation of instance stopped waiter
+type MockInstanceStoppedWaiter struct {
+	*ec2.InstanceStoppedWaiter
+}
+
+// Wait implements waiter interface
+func (m *MockInstanceStoppedWaiter) Wait(ctx context.Context, params *ec2.DescribeInstancesInput, maxWaitDur time.Duration) error {
+	return nil
+}
+
+// MockInstanceTerminatedWaiter is a mock implementation of instance terminated waiter
+type MockInstanceTerminatedWaiter struct {
+	*ec2.InstanceTerminatedWaiter
+}
+
+// Wait implements waiter interface
+func (m *MockInstanceTerminatedWaiter) Wait(ctx context.Context, params *ec2.DescribeInstancesInput, maxWaitDur time.Duration) error {
+	return nil
+}
+
+// NewInstanceRunningWaiter returns a mock running waiter
+func (m *MockEC2Client) NewInstanceRunningWaiter() *MockInstanceRunningWaiter {
+	return &MockInstanceRunningWaiter{}
+}
+
+// NewInstanceStoppedWaiter returns a mock stopped waiter
+func (m *MockEC2Client) NewInstanceStoppedWaiter() *MockInstanceStoppedWaiter {
+	return &MockInstanceStoppedWaiter{}
+}
+
+// NewInstanceTerminatedWaiter returns a mock terminated waiter
+func (m *MockEC2Client) NewInstanceTerminatedWaiter() *MockInstanceTerminatedWaiter {
+	return &MockInstanceTerminatedWaiter{}
 }

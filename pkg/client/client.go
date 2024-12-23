@@ -179,5 +179,27 @@ func NewMockEC2Client() *ecTypes.MockEC2Client {
 				},
 			},
 		},
+		CreateSnapshotOutput: &ec2.CreateSnapshotOutput{
+			SnapshotId: aws.String("snap-123"),
+		},
+		DescribeSnapshotsOutput: &ec2.DescribeSnapshotsOutput{
+			Snapshots: []types.Snapshot{
+				{
+					SnapshotId: aws.String("snap-123"),
+					State:      types.SnapshotStateCompleted,
+				},
+			},
+		},
+		CreateVolumeOutput: &ec2.CreateVolumeOutput{
+			VolumeId: aws.String("vol-123"),
+		},
+		DescribeVolumesOutput: &ec2.DescribeVolumesOutput{
+			Volumes: []types.Volume{
+				{
+					VolumeId: aws.String("vol-123"),
+					State:    types.VolumeStateAvailable,
+				},
+			},
+		},
 	}
 }

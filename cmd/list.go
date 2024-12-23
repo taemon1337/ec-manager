@@ -4,10 +4,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/spf13/cobra"
 	"github.com/taemon1337/ec-manager/pkg/ami"
+	"github.com/taemon1337/ec-manager/pkg/logger"
 )
 
 var listCmd = &cobra.Command{
@@ -27,18 +26,19 @@ Shows instance details including:
 			return err
 		}
 
-		// Load AWS configuration
-		cfg, err := config.LoadDefaultConfig(cmd.Context())
+		// Get EC2 client from our client package
+		ctx := cmd.Context()
+		ec2Client, err := awsClient.GetEC2Client(ctx)
 		if err != nil {
-			return fmt.Errorf("load AWS config: %w", err)
+			return fmt.Errorf("failed to get EC2 client: %w", err)
 		}
 
-		// Create EC2 client and AMI service
-		ec2Client := ec2.NewFromConfig(cfg)
+		// Create AMI service
 		amiService := ami.NewService(ec2Client)
 
 		// List instances
-		instances, err := amiService.ListUserInstances(cmd.Context(), userID)
+		logger.Info("Listing instances for user: " + userID)
+		instances, err := amiService.ListUserInstances(ctx, userID)
 		if err != nil {
 			return fmt.Errorf("failed to list instances: %v", err)
 		}

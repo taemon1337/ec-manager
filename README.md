@@ -212,6 +212,27 @@ Value: [detailed status message]
 - Make
 - AWS credentials configured (for automatic user detection)
 
+### Mock Mode
+
+For testing and development, you can use mock mode which simulates AWS interactions:
+
+```bash
+# Run any command with mock mode
+ecman backup --mock --instance-id i-123456
+
+# List instances in mock mode
+ecman list --mock
+
+# Test migration in mock mode
+ecman migrate --mock --instance-id i-123456 --new-ami ami-123456
+```
+
+Mock mode provides:
+- Safe testing without real AWS interactions
+- Predictable responses for development
+- No AWS credentials required
+- Default mock responses for common operations
+
 ### Build and Test
 ```bash
 # Build project

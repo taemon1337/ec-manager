@@ -1107,6 +1107,11 @@ func (w *terminatedWaiter) Wait(ctx context.Context, params *ec2.DescribeInstanc
 
 // waitForInstanceState waits for an instance to reach the desired state
 func waitForInstanceState(ctx context.Context, client ecTypes.EC2ClientAPI, instanceID string, desiredState types.InstanceStateName) error {
+	// For mock client, return immediately since state transitions are immediate
+	if _, ok := client.(*ecTypes.MockEC2Client); ok {
+		return nil
+	}
+
 	var waiter waiterInterface
 
 	switch desiredState {
