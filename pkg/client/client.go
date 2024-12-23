@@ -8,73 +8,98 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
-	"github.com/taemon1337/ec-manager/pkg/types"
+	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
+	ecTypes "github.com/taemon1337/ec-manager/pkg/types"
 )
 
-var defaultClient *Client
+var (
+	defaultClient *Client
+	mockMode      bool
+	mockClient    ecTypes.EC2Client
+)
 
+// configLoaderInterface defines the interface for loading AWS config
+type configLoaderInterface interface {
+	LoadDefaultConfig(context.Context, ...func(*config.LoadOptions) error) (aws.Config, error)
+}
+
+// defaultConfigLoader implements configLoaderInterface using the actual AWS SDK
+type defaultConfigLoader struct{}
+
+func (d *defaultConfigLoader) LoadDefaultConfig(ctx context.Context, optFns ...func(*config.LoadOptions) error) (aws.Config, error) {
+	return config.LoadDefaultConfig(ctx, optFns...)
+}
+
+// configLoader is used to load AWS config, can be replaced in tests
+var configLoader configLoaderInterface = &defaultConfigLoader{}
+
+// Client represents a client for interacting with AWS services
 type Client struct {
-	cfg        aws.Config
-	ready      bool
-	mockMode   bool
-	mockClient types.EC2Client
+	ec2Client ecTypes.EC2Client
 }
 
 func init() {
 	defaultClient = NewClient()
 }
 
-// NewClient creates a new AWS client
+// NewClient creates a new client
 func NewClient() *Client {
 	return &Client{}
 }
 
 // SetMockMode enables or disables mock mode
 func SetMockMode(enabled bool) {
-	defaultClient.mockMode = enabled
+	mockMode = enabled
 }
 
-// SetMockEC2Client sets the mock EC2 client for testing
-func SetMockEC2Client(client types.EC2Client) {
-	defaultClient.mockClient = client
-}
-
-// SetMockMode sets the mock mode for the client
-func (c *Client) SetMockMode(enabled bool) {
-	c.mockMode = enabled
-}
-
-// SetEC2Client sets the EC2 client for the client
-func (c *Client) SetEC2Client(client types.EC2Client) {
-	c.mockClient = client
+// SetMockClient sets the mock client
+func SetMockClient(client ecTypes.EC2Client) {
+	mockClient = client
 }
 
 // GetEC2Client returns an EC2 client
-func (c *Client) GetEC2Client(ctx context.Context) (types.EC2Client, error) {
-	if c.mockMode {
-		if c.mockClient == nil {
+func GetEC2Client() ecTypes.EC2Client {
+	if mockMode {
+		if mockClient == nil {
+			panic("mock client not set")
+		}
+		return mockClient
+	}
+	return nil
+}
+
+// GetEC2Client returns an EC2 client
+func (c *Client) GetEC2Client(ctx context.Context) (ecTypes.EC2Client, error) {
+	if mockMode {
+		if mockClient == nil {
 			return nil, fmt.Errorf("mock client not set")
 		}
-		return c.mockClient, nil
+		return mockClient, nil
 	}
 
-	if !c.ready {
-		cfg, err := LoadAWSConfig(ctx)
-		if err != nil {
-			return nil, err
-		}
-		c.cfg = cfg
-		c.ready = true
+	if c.ec2Client != nil {
+		return c.ec2Client, nil
 	}
 
-	return ec2.NewFromConfig(c.cfg), nil
+	cfg, err := LoadAWSConfig(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("load aws config: %w", err)
+	}
+
+	c.ec2Client = ec2.NewFromConfig(cfg)
+	return c.ec2Client, nil
+}
+
+// LoadAWSConfig loads the AWS configuration
+func LoadAWSConfig(ctx context.Context) (aws.Config, error) {
+	return configLoader.LoadDefaultConfig(ctx)
 }
 
 // LoadAWSConfig loads AWS configuration from environment variables or credentials file
-func LoadAWSConfig(ctx context.Context) (aws.Config, error) {
+func LoadAWSConfigWithRegion(ctx context.Context, region string) (aws.Config, error) {
 	// Check if AWS credentials are set
 	if os.Getenv("AWS_ACCESS_KEY_ID") == "" || os.Getenv("AWS_SECRET_ACCESS_KEY") == "" {
-		return config.LoadDefaultConfig(ctx, config.WithRegion("us-west-2"))
+		return config.LoadDefaultConfig(ctx, config.WithRegion(region))
 	}
 
 	cfg, err := config.LoadDefaultConfig(ctx)
@@ -83,4 +108,76 @@ func LoadAWSConfig(ctx context.Context) (aws.Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// NewMockEC2Client creates a new mock EC2 client with default outputs
+func NewMockEC2Client() *ecTypes.MockEC2Client {
+	return &ecTypes.MockEC2Client{
+		DescribeInstancesOutput: &ec2.DescribeInstancesOutput{
+			Reservations: []types.Reservation{
+				{
+					Instances: []types.Instance{
+						{
+							InstanceId: aws.String("i-123"),
+							State: &types.InstanceState{
+								Name: types.InstanceStateNameRunning,
+							},
+						},
+					},
+				},
+			},
+		},
+		StopInstancesOutput: &ec2.StopInstancesOutput{
+			StoppingInstances: []types.InstanceStateChange{
+				{
+					CurrentState: &types.InstanceState{
+						Name: types.InstanceStateNameStopped,
+					},
+					InstanceId: aws.String("i-123"),
+				},
+			},
+		},
+		StartInstancesOutput: &ec2.StartInstancesOutput{
+			StartingInstances: []types.InstanceStateChange{
+				{
+					CurrentState: &types.InstanceState{
+						Name: types.InstanceStateNameRunning,
+					},
+					InstanceId: aws.String("i-123"),
+				},
+			},
+		},
+		CreateImageOutput: &ec2.CreateImageOutput{
+			ImageId: aws.String("ami-123"),
+		},
+		DescribeImagesOutput: &ec2.DescribeImagesOutput{
+			Images: []types.Image{
+				{
+					ImageId: aws.String("ami-123"),
+					State:   types.ImageStateAvailable,
+				},
+			},
+		},
+		CreateTagsOutput: &ec2.CreateTagsOutput{},
+		RunInstancesOutput: &ec2.RunInstancesOutput{
+			Instances: []types.Instance{
+				{
+					InstanceId: aws.String("i-new"),
+					State: &types.InstanceState{
+						Name: types.InstanceStateNamePending,
+					},
+				},
+			},
+		},
+		TerminateInstancesOutput: &ec2.TerminateInstancesOutput{
+			TerminatingInstances: []types.InstanceStateChange{
+				{
+					CurrentState: &types.InstanceState{
+						Name: types.InstanceStateNameShuttingDown,
+					},
+					InstanceId: aws.String("i-123"),
+				},
+			},
+		},
+	}
 }

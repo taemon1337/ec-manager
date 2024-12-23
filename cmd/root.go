@@ -62,7 +62,7 @@ It provides commands for:
 			return fmt.Errorf("failed to get mock flag: %w", err)
 		}
 		if mock {
-			awsClient.SetMockMode(true)
+			client.SetMockMode(true)
 		}
 		return nil
 	},

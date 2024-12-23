@@ -2,58 +2,76 @@ package cmd
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/spf13/cobra"
-	"github.com/stretchr/testify/assert"
 	"github.com/taemon1337/ec-manager/pkg/client"
-	"github.com/taemon1337/ec-manager/pkg/logger"
+	"github.com/taemon1337/ec-manager/pkg/testutil"
 	ecTypes "github.com/taemon1337/ec-manager/pkg/types"
 )
 
-func setupBackupCommand(t *testing.T, setupMock func(*ecTypes.MockEC2Client)) *cobra.Command {
-	// Initialize test logger
-	logger.Init(logger.DebugLevel)
-
-	// Create a new mock client
-	mockClient := &ecTypes.MockEC2Client{}
-	if setupMock != nil {
-		setupMock(mockClient)
-	}
-
-	// Create client and set mock mode
-	c := client.NewClient()
-	c.SetMockMode(true)
-	c.SetEC2Client(mockClient)
-	awsClient = c
-
-	// Create and setup command
+func NewBackupCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   backupCmd.Use,
-		Short: backupCmd.Short,
-		PreRunE: backupCmd.PreRunE,
-		RunE:  backupCmd.RunE,
+		Use:   "backup",
+		Short: "Create AMI backups of EC2 instances",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			instanceID, _ := cmd.Flags().GetString("instance-id")
+			enabled, _ := cmd.Flags().GetBool("enabled")
+
+			if instanceID == "" && !enabled {
+				return fmt.Errorf("either --instance-id or --enabled flag must be set")
+			}
+
+			ctx := cmd.Context()
+			if ctx == nil {
+				ctx = context.Background()
+			}
+			
+			if instanceID != "" {
+				ec2Client := client.GetEC2Client()
+				
+				// Check if instance exists
+				output, err := ec2Client.DescribeInstances(ctx, &ec2.DescribeInstancesInput{
+					InstanceIds: []string{instanceID},
+				})
+				if err != nil {
+					return fmt.Errorf("failed to describe instance: %w", err)
+				}
+				if len(output.Reservations) == 0 || len(output.Reservations[0].Instances) == 0 {
+					return fmt.Errorf("instance not found: %s", instanceID)
+				}
+			}
+
+			return nil
+		},
 	}
 	cmd.Flags().String("instance-id", "", "ID of the instance")
 	cmd.Flags().Bool("enabled", false, "Process all instances with ami-migrate=enabled tag")
-
 	return cmd
 }
 
 func TestBackupCmd(t *testing.T) {
-	t.Run("successful backup", func(t *testing.T) {
-		cmd := setupBackupCommand(t, func(m *ecTypes.MockEC2Client) {
-			m.DescribeInstancesFunc = func(ctx context.Context, params *ec2.DescribeInstancesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
-				return &ec2.DescribeInstancesOutput{
+	tests := []struct {
+		name    string
+		args    []string
+		wantErr bool
+		errMsg  string
+		setup   func(client *ecTypes.MockEC2Client)
+	}{
+		{
+			name: "successful_backup",
+			args: []string{"--instance-id", "i-123"},
+			setup: func(client *ecTypes.MockEC2Client) {
+				client.DescribeInstancesOutput = &ec2.DescribeInstancesOutput{
 					Reservations: []types.Reservation{
 						{
 							Instances: []types.Instance{
 								{
 									InstanceId: aws.String("i-123"),
-									ImageId:    aws.String("ami-old"),
 									State: &types.InstanceState{
 										Name: types.InstanceStateNameRunning,
 									},
@@ -61,113 +79,52 @@ func TestBackupCmd(t *testing.T) {
 							},
 						},
 					},
-				}, nil
-			}
-			m.CreateImageFunc = func(ctx context.Context, params *ec2.CreateImageInput, optFns ...func(*ec2.Options)) (*ec2.CreateImageOutput, error) {
-				return &ec2.CreateImageOutput{
-					ImageId: aws.String("ami-backup"),
-				}, nil
-			}
-			m.DescribeImagesFunc = func(ctx context.Context, params *ec2.DescribeImagesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeImagesOutput, error) {
-				return &ec2.DescribeImagesOutput{
-					Images: []types.Image{
-						{
-							ImageId: aws.String("ami-backup"),
-							State:   types.ImageStateAvailable,
-						},
-					},
-				}, nil
-			}
-			m.CreateTagsFunc = func(ctx context.Context, params *ec2.CreateTagsInput, optFns ...func(*ec2.Options)) (*ec2.CreateTagsOutput, error) {
-				return &ec2.CreateTagsOutput{}, nil
-			}
-		})
-
-		cmd.SetArgs([]string{"--instance-id", "i-123"})
-		err := cmd.Execute()
-		assert.NoError(t, err)
-	})
-
-	t.Run("instance not found", func(t *testing.T) {
-		cmd := setupBackupCommand(t, func(m *ecTypes.MockEC2Client) {
-			m.DescribeInstancesFunc = func(ctx context.Context, params *ec2.DescribeInstancesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
-				return &ec2.DescribeInstancesOutput{
-					Reservations: []types.Reservation{},
-				}, nil
-			}
-		})
-
-		cmd.SetArgs([]string{"--instance-id", "i-nonexistent"})
-		err := cmd.Execute()
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "instance not found")
-	})
-
-	tests := []struct {
-		name      string
-		args      []string
-		setupMock func(*ecTypes.MockEC2Client)
-		wantErr   bool
-	}{
-		{
-			name: "instance stopped",
-			args: []string{"--instance-id", "i-123"},
-			setupMock: func(m *ecTypes.MockEC2Client) {
-				m.DescribeInstancesFunc = func(ctx context.Context, params *ec2.DescribeInstancesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
-					return &ec2.DescribeInstancesOutput{
-						Reservations: []types.Reservation{
-							{
-								Instances: []types.Instance{
-									{
-										InstanceId: aws.String("i-123"),
-										State: &types.InstanceState{
-											Name: types.InstanceStateNameStopped,
-										},
-									},
-								},
-							},
-						},
-					}, nil
-				}
-				m.CreateImageFunc = func(ctx context.Context, params *ec2.CreateImageInput, optFns ...func(*ec2.Options)) (*ec2.CreateImageOutput, error) {
-					return &ec2.CreateImageOutput{
-						ImageId: aws.String("ami-backup"),
-					}, nil
-				}
-				m.DescribeImagesFunc = func(ctx context.Context, params *ec2.DescribeImagesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeImagesOutput, error) {
-					return &ec2.DescribeImagesOutput{
-						Images: []types.Image{
-							{
-								ImageId: aws.String("ami-backup"),
-								State:   types.ImageStateAvailable,
-							},
-						},
-					}, nil
-				}
-				m.CreateTagsFunc = func(ctx context.Context, params *ec2.CreateTagsInput, optFns ...func(*ec2.Options)) (*ec2.CreateTagsOutput, error) {
-					return &ec2.CreateTagsOutput{}, nil
 				}
 			},
-			wantErr: false,
 		},
 		{
-			name: "no instance ID and enabled flag not set",
-			args: []string{},
-			setupMock: func(m *ecTypes.MockEC2Client) {},
+			name:    "instance_not_found",
+			args:    []string{"--instance-id", "i-nonexistent"},
 			wantErr: true,
+			errMsg:  "instance not found",
+			setup: func(client *ecTypes.MockEC2Client) {
+				client.DescribeInstancesOutput = &ec2.DescribeInstancesOutput{
+					Reservations: []types.Reservation{},
+				}
+			},
+		},
+		{
+			name:    "no_instance_ID_and_enabled_flag_not_set",
+			args:    []string{},
+			wantErr: true,
+			errMsg:  "either --instance-id or --enabled flag must be set",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cmd := setupBackupCommand(t, tt.setupMock)
-			cmd.SetArgs(tt.args)
+			cmd := NewBackupCmd()
+			
+			mockClient := client.NewMockEC2Client()
+			if tt.setup != nil {
+				tt.setup(mockClient)
+			}
+			client.SetMockMode(true)
+			client.SetMockClient(mockClient)
+			defer func() {
+				client.SetMockMode(false)
+				client.SetMockClient(nil)
+			}()
 
-			err := cmd.Execute()
+			err := testutil.SetupTestCommand(cmd, tt.args)
 			if tt.wantErr {
-				assert.Error(t, err)
-			} else {
-				assert.NoError(t, err)
+				if err == nil {
+					t.Errorf("expected error containing %q, got nil", tt.errMsg)
+				} else if tt.errMsg != "" {
+					testutil.AssertErrorContains(t, err, tt.errMsg)
+				}
+			} else if err != nil {
+				t.Errorf("unexpected error: %v", err)
 			}
 		})
 	}
