@@ -33,7 +33,7 @@ type stsIdentityAPI interface {
 
 // Variables to allow mocking in tests
 var (
-	loadConfig = config.LoadDefaultConfig
+	loadConfig   = config.LoadDefaultConfig
 	newSTSClient = func(cfg aws.Config) STSAPI {
 		return sts.NewFromConfig(cfg)
 	}
@@ -48,10 +48,10 @@ var (
 // discoverRoleARN attempts to discover available roles for the user
 func discoverRoleARN(ctx context.Context, cfg aws.Config) ([]string, error) {
 	var roleARNs []string
-	
+
 	// Create IAM client
 	iamClient := newIAMClient(cfg)
-	
+
 	// Try to get current user info
 	user, err := iamClient.GetUser(ctx, &iam.GetUserInput{})
 	if err != nil {
@@ -61,10 +61,10 @@ func discoverRoleARN(ctx context.Context, cfg aws.Config) ([]string, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to get caller identity: %w", err)
 		}
-		
+
 		// Extract account ID from identity
 		accountID := *identity.Account
-		
+
 		// List roles (if we have permission)
 		roles, err := iamClient.ListRoles(ctx, &iam.ListRolesInput{})
 		if err == nil {
@@ -74,31 +74,31 @@ func discoverRoleARN(ctx context.Context, cfg aws.Config) ([]string, error) {
 				}
 			}
 		}
-		
+
 		if len(roleARNs) == 0 {
 			// If we can't list roles, at least we have the account ID
 			return nil, fmt.Errorf("could not list roles. Your AWS Account ID is: %s\nUse this to construct your role ARN: arn:aws:iam::%s:role/YOUR_ROLE_NAME", accountID, accountID)
 		}
-		
+
 		return roleARNs, nil
 	}
-	
+
 	// We have user info, get account ID from ARN
 	accountID := strings.Split(*user.User.Arn, ":")[4]
-	
+
 	// List roles
 	roles, err := iamClient.ListRoles(ctx, &iam.ListRolesInput{})
 	if err != nil {
 		return nil, fmt.Errorf("could not list roles. Your AWS Account ID is: %s\nUse this to construct your role ARN: arn:aws:iam::%s:role/YOUR_ROLE_NAME", accountID, accountID)
 	}
-	
+
 	// Collect role ARNs
 	for _, role := range roles.Roles {
 		if role.RoleName != nil && role.Arn != nil {
 			roleARNs = append(roleARNs, *role.Arn)
 		}
 	}
-	
+
 	return roleARNs, nil
 }
 
@@ -135,7 +135,7 @@ func NewLoginCmd() *cobra.Command {
 					fmt.Fprintln(cmd.OutOrStderr(), err.Error())
 					return nil
 				}
-				
+
 				fmt.Fprintln(cmd.OutOrStdout(), "Available roles:")
 				for _, role := range roles {
 					fmt.Fprintf(cmd.OutOrStdout(), "- %s\n", role)
@@ -150,11 +150,11 @@ func NewLoginCmd() *cobra.Command {
 					fmt.Fprintln(cmd.OutOrStderr(), err.Error())
 					return fmt.Errorf("--role-arn is required. Use --list-roles to see available roles")
 				}
-				
+
 				if len(roles) == 0 {
 					return fmt.Errorf("--role-arn is required and no roles were found")
 				}
-				
+
 				fmt.Fprintln(cmd.OutOrStdout(), "Available roles:")
 				for _, role := range roles {
 					fmt.Fprintf(cmd.OutOrStdout(), "- %s\n", role)

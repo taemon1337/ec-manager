@@ -13,12 +13,12 @@ import (
 
 var (
 	// Common flags
-	instanceID string
-	enabled    bool
-	newAMI     string
-	userID     string
-	logLevel   string
-	timeout    time.Duration
+	instanceID     string
+	enabled        bool
+	newAMI         string
+	userID         string
+	logLevel       string
+	timeout        time.Duration
 	defaultTimeout = 5 * time.Minute
 
 	// AWS client

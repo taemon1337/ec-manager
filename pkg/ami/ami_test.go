@@ -15,16 +15,16 @@ import (
 )
 
 type mockEC2Client struct {
-	DescribeInstancesFunc func(ctx context.Context, params *ec2.DescribeInstancesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error)
-	DescribeImagesFunc   func(ctx context.Context, params *ec2.DescribeImagesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeImagesOutput, error)
-	CreateTagsFunc       func(ctx context.Context, params *ec2.CreateTagsInput, optFns ...func(*ec2.Options)) (*ec2.CreateTagsOutput, error)
-	RunInstancesFunc     func(ctx context.Context, params *ec2.RunInstancesInput, optFns ...func(*ec2.Options)) (*ec2.RunInstancesOutput, error)
-	StopInstancesFunc    func(ctx context.Context, params *ec2.StopInstancesInput, optFns ...func(*ec2.Options)) (*ec2.StopInstancesOutput, error)
-	StartInstancesFunc   func(ctx context.Context, params *ec2.StartInstancesInput, optFns ...func(*ec2.Options)) (*ec2.StartInstancesOutput, error)
-	AttachVolumeFunc    func(ctx context.Context, params *ec2.AttachVolumeInput, optFns ...func(*ec2.Options)) (*ec2.AttachVolumeOutput, error)
-	CreateSnapshotFunc  func(ctx context.Context, params *ec2.CreateSnapshotInput, optFns ...func(*ec2.Options)) (*ec2.CreateSnapshotOutput, error)
+	DescribeInstancesFunc  func(ctx context.Context, params *ec2.DescribeInstancesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error)
+	DescribeImagesFunc     func(ctx context.Context, params *ec2.DescribeImagesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeImagesOutput, error)
+	CreateTagsFunc         func(ctx context.Context, params *ec2.CreateTagsInput, optFns ...func(*ec2.Options)) (*ec2.CreateTagsOutput, error)
+	RunInstancesFunc       func(ctx context.Context, params *ec2.RunInstancesInput, optFns ...func(*ec2.Options)) (*ec2.RunInstancesOutput, error)
+	StopInstancesFunc      func(ctx context.Context, params *ec2.StopInstancesInput, optFns ...func(*ec2.Options)) (*ec2.StopInstancesOutput, error)
+	StartInstancesFunc     func(ctx context.Context, params *ec2.StartInstancesInput, optFns ...func(*ec2.Options)) (*ec2.StartInstancesOutput, error)
+	AttachVolumeFunc       func(ctx context.Context, params *ec2.AttachVolumeInput, optFns ...func(*ec2.Options)) (*ec2.AttachVolumeOutput, error)
+	CreateSnapshotFunc     func(ctx context.Context, params *ec2.CreateSnapshotInput, optFns ...func(*ec2.Options)) (*ec2.CreateSnapshotOutput, error)
 	TerminateInstancesFunc func(ctx context.Context, params *ec2.TerminateInstancesInput, optFns ...func(*ec2.Options)) (*ec2.TerminateInstancesOutput, error)
-	CreateVolumeFunc    func(ctx context.Context, params *ec2.CreateVolumeInput, optFns ...func(*ec2.Options)) (*ec2.CreateVolumeOutput, error)
+	CreateVolumeFunc       func(ctx context.Context, params *ec2.CreateVolumeInput, optFns ...func(*ec2.Options)) (*ec2.CreateVolumeOutput, error)
 }
 
 func (m *mockEC2Client) DescribeInstances(ctx context.Context, params *ec2.DescribeInstancesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
@@ -335,8 +335,8 @@ func TestMigrateInstance(t *testing.T) {
 				}
 			},
 			instanceID:  "i-nonexistent",
-			newAMI:     "ami-new",
-			wantErr:    true,
+			newAMI:      "ami-new",
+			wantErr:     true,
 			errContains: "instance not found",
 		},
 		{
@@ -364,8 +364,8 @@ func TestMigrateInstance(t *testing.T) {
 				}
 			},
 			instanceID:  "i-123",
-			newAMI:     "ami-new",
-			wantErr:    true,
+			newAMI:      "ami-new",
+			wantErr:     true,
 			errContains: "failed to stop instance",
 		},
 	}
@@ -439,7 +439,7 @@ func TestBackupInstance(t *testing.T) {
 					}, nil
 				}
 			},
-			instanceID:   "i-123",
+			instanceID:  "i-123",
 			wantErr:     true,
 			errContains: "instance not found",
 		},
@@ -512,8 +512,8 @@ func TestListUserInstances(t *testing.T) {
 					}, nil
 				}
 			},
-			userID:   "user123",
-			wantErr:  false,
+			userID:  "user123",
+			wantErr: false,
 		},
 		{
 			name: "no instances found",
@@ -617,7 +617,7 @@ func TestCreateInstance(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "invalid size",
+			name:      "invalid size",
 			setupMock: func(m *ecTypes.MockEC2Client) {},
 			config: InstanceConfig{
 				Name:   "test-instance",

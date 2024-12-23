@@ -1,5 +1,9 @@
 # EC2 Manager (ecman)
 
+[![Go Report Card](https://goreportcard.com/badge/github.com/taemon1337/ec-manager)](https://goreportcard.com/report/github.com/taemon1337/ec-manager)
+[![GoDoc](https://godoc.org/github.com/taemon1337/ec-manager?status.svg)](https://godoc.org/github.com/taemon1337/ec-manager)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 A comprehensive CLI tool for managing AWS EC2 instances. This tool helps automate common EC2 management tasks including instance creation, AMI migrations, backups, and lifecycle management.
 
 ## Quick Start
@@ -216,6 +220,12 @@ make build
 # Run tests
 make test
 
+# Format code
+make fmt
+
+# Run linter
+make lint
+
 # Build Docker image
 make docker-build
 ```
@@ -232,20 +242,41 @@ ec-manager/
 │   ├── migrate.go    
 │   └── root.go       
 ├── pkg/
-│   ├── ami/          # Core functionality
+│   ├── ami/          # Core AMI functionality
 │   │   ├── ami.go    
 │   │   ├── ami_test.go
 │   │   └── mock_ec2.go
-│   └── config/       # Configuration
-│       └── aws.go    # AWS credentials handling
+│   ├── client/       # AWS client handling
+│   │   ├── client.go
+│   │   └── client_test.go
+│   ├── config/       # Configuration
+│   │   └── aws.go    
+│   ├── logger/       # Logging utilities
+│   │   └── logger.go
+│   ├── testutil/     # Testing utilities
+│   │   └── test_helpers.go
+│   └── types/        # Common types and interfaces
+│       └── types.go
 ```
 
-### Adding Features
-1. Add service functions in `pkg/ami/ami.go`
-2. Add unit tests in `pkg/ami/ami_test.go`
-3. Update mock client if needed
-4. Create CLI command in `cmd/`
-5. Update documentation
+### Contributing
+
+Contributions are welcome! Here's how you can help:
+
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/amazing-feature`)
+3. Format your code (`make fmt`)
+4. Run tests (`make test`)
+5. Run linter (`make lint`)
+6. Commit your changes (`git commit -m 'Add some amazing feature'`)
+7. Push to the branch (`git push origin feature/amazing-feature`)
+8. Open a Pull Request
+
+Please make sure your PR:
+- Includes tests for new functionality
+- Updates documentation as needed
+- Follows the existing code style
+- Includes a clear description of changes
 
 ## Usage Notes
 

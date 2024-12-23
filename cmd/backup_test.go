@@ -30,10 +30,10 @@ func NewBackupCmd() *cobra.Command {
 			if ctx == nil {
 				ctx = context.Background()
 			}
-			
+
 			if instanceID != "" {
 				ec2Client := client.GetEC2Client()
-				
+
 				// Check if instance exists
 				output, err := ec2Client.DescribeInstances(ctx, &ec2.DescribeInstancesInput{
 					InstanceIds: []string{instanceID},
@@ -104,7 +104,7 @@ func TestBackupCmd(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cmd := NewBackupCmd()
-			
+
 			mockClient := client.NewMockEC2Client()
 			if tt.setup != nil {
 				tt.setup(mockClient)

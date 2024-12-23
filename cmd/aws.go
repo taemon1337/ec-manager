@@ -19,7 +19,7 @@ func initAWSClients(ctx context.Context) (*ami.Service, error) {
 
 	// Create EC2 client
 	ec2Client := ec2.NewFromConfig(cfg)
-	
+
 	// Create and return AMI service
 	return ami.NewService(ec2Client), nil
 }

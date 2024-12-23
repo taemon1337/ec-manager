@@ -37,8 +37,8 @@ func (m *mockSTSClient) AssumeRole(ctx context.Context, params *sts.AssumeRoleIn
 
 // Mock IAM client
 type mockIAMClient struct {
-	GetUserOutput  *iam.GetUserOutput
-	GetUserError   error
+	GetUserOutput   *iam.GetUserOutput
+	GetUserError    error
 	ListRolesOutput *iam.ListRolesOutput
 	ListRolesError  error
 }

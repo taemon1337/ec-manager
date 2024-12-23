@@ -9,34 +9,34 @@ import (
 // MockEC2Client is a mock implementation of EC2Client
 type MockEC2Client struct {
 	// Outputs
-	DescribeInstancesOutput *ec2.DescribeInstancesOutput
-	StopInstancesOutput    *ec2.StopInstancesOutput
-	StartInstancesOutput   *ec2.StartInstancesOutput
-	CreateImageOutput      *ec2.CreateImageOutput
-	DescribeImagesOutput   *ec2.DescribeImagesOutput
-	CreateTagsOutput       *ec2.CreateTagsOutput
-	RunInstancesOutput     *ec2.RunInstancesOutput
+	DescribeInstancesOutput  *ec2.DescribeInstancesOutput
+	StopInstancesOutput      *ec2.StopInstancesOutput
+	StartInstancesOutput     *ec2.StartInstancesOutput
+	CreateImageOutput        *ec2.CreateImageOutput
+	DescribeImagesOutput     *ec2.DescribeImagesOutput
+	CreateTagsOutput         *ec2.CreateTagsOutput
+	RunInstancesOutput       *ec2.RunInstancesOutput
 	TerminateInstancesOutput *ec2.TerminateInstancesOutput
-	AttachVolumeOutput     *ec2.AttachVolumeOutput
-	CreateSnapshotOutput   *ec2.CreateSnapshotOutput
-	CreateVolumeOutput     *ec2.CreateVolumeOutput
-	DescribeSnapshotsOutput *ec2.DescribeSnapshotsOutput
-	DescribeVolumesOutput   *ec2.DescribeVolumesOutput
+	AttachVolumeOutput       *ec2.AttachVolumeOutput
+	CreateSnapshotOutput     *ec2.CreateSnapshotOutput
+	CreateVolumeOutput       *ec2.CreateVolumeOutput
+	DescribeSnapshotsOutput  *ec2.DescribeSnapshotsOutput
+	DescribeVolumesOutput    *ec2.DescribeVolumesOutput
 
 	// Functions
-	DescribeInstancesFunc func(context.Context, *ec2.DescribeInstancesInput, ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error)
-	StopInstancesFunc    func(context.Context, *ec2.StopInstancesInput, ...func(*ec2.Options)) (*ec2.StopInstancesOutput, error)
-	StartInstancesFunc   func(context.Context, *ec2.StartInstancesInput, ...func(*ec2.Options)) (*ec2.StartInstancesOutput, error)
-	CreateImageFunc      func(context.Context, *ec2.CreateImageInput, ...func(*ec2.Options)) (*ec2.CreateImageOutput, error)
-	DescribeImagesFunc   func(context.Context, *ec2.DescribeImagesInput, ...func(*ec2.Options)) (*ec2.DescribeImagesOutput, error)
-	CreateTagsFunc       func(context.Context, *ec2.CreateTagsInput, ...func(*ec2.Options)) (*ec2.CreateTagsOutput, error)
-	RunInstancesFunc     func(context.Context, *ec2.RunInstancesInput, ...func(*ec2.Options)) (*ec2.RunInstancesOutput, error)
+	DescribeInstancesFunc  func(context.Context, *ec2.DescribeInstancesInput, ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error)
+	StopInstancesFunc      func(context.Context, *ec2.StopInstancesInput, ...func(*ec2.Options)) (*ec2.StopInstancesOutput, error)
+	StartInstancesFunc     func(context.Context, *ec2.StartInstancesInput, ...func(*ec2.Options)) (*ec2.StartInstancesOutput, error)
+	CreateImageFunc        func(context.Context, *ec2.CreateImageInput, ...func(*ec2.Options)) (*ec2.CreateImageOutput, error)
+	DescribeImagesFunc     func(context.Context, *ec2.DescribeImagesInput, ...func(*ec2.Options)) (*ec2.DescribeImagesOutput, error)
+	CreateTagsFunc         func(context.Context, *ec2.CreateTagsInput, ...func(*ec2.Options)) (*ec2.CreateTagsOutput, error)
+	RunInstancesFunc       func(context.Context, *ec2.RunInstancesInput, ...func(*ec2.Options)) (*ec2.RunInstancesOutput, error)
 	TerminateInstancesFunc func(context.Context, *ec2.TerminateInstancesInput, ...func(*ec2.Options)) (*ec2.TerminateInstancesOutput, error)
-	AttachVolumeFunc     func(context.Context, *ec2.AttachVolumeInput, ...func(*ec2.Options)) (*ec2.AttachVolumeOutput, error)
-	CreateSnapshotFunc   func(context.Context, *ec2.CreateSnapshotInput, ...func(*ec2.Options)) (*ec2.CreateSnapshotOutput, error)
-	CreateVolumeFunc     func(context.Context, *ec2.CreateVolumeInput, ...func(*ec2.Options)) (*ec2.CreateVolumeOutput, error)
-	DescribeSnapshotsFunc func(context.Context, *ec2.DescribeSnapshotsInput, ...func(*ec2.Options)) (*ec2.DescribeSnapshotsOutput, error)
-	DescribeVolumesFunc   func(context.Context, *ec2.DescribeVolumesInput, ...func(*ec2.Options)) (*ec2.DescribeVolumesOutput, error)
+	AttachVolumeFunc       func(context.Context, *ec2.AttachVolumeInput, ...func(*ec2.Options)) (*ec2.AttachVolumeOutput, error)
+	CreateSnapshotFunc     func(context.Context, *ec2.CreateSnapshotInput, ...func(*ec2.Options)) (*ec2.CreateSnapshotOutput, error)
+	CreateVolumeFunc       func(context.Context, *ec2.CreateVolumeInput, ...func(*ec2.Options)) (*ec2.CreateVolumeOutput, error)
+	DescribeSnapshotsFunc  func(context.Context, *ec2.DescribeSnapshotsInput, ...func(*ec2.Options)) (*ec2.DescribeSnapshotsOutput, error)
+	DescribeVolumesFunc    func(context.Context, *ec2.DescribeVolumesInput, ...func(*ec2.Options)) (*ec2.DescribeVolumesOutput, error)
 }
 
 // NewMockEC2Client creates a new mock EC2 client

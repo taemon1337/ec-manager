@@ -28,8 +28,8 @@ type Logger struct {
 
 var (
 	defaultLogger *Logger
-	loggerOnce   sync.Once
-	mu           sync.RWMutex
+	loggerOnce    sync.Once
+	mu            sync.RWMutex
 )
 
 // NewLogger creates a new logger with the specified level and writer

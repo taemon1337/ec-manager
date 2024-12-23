@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 	"sync"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
@@ -564,11 +564,11 @@ func (s *Service) GetInstanceOSType(ctx context.Context, instanceID string) (str
 			description := aws.ToString(image.Description)
 
 			switch {
-			case strings.Contains(strings.ToLower(name), "rhel") || 
-				 strings.Contains(strings.ToLower(description), "red hat"):
+			case strings.Contains(strings.ToLower(name), "rhel") ||
+				strings.Contains(strings.ToLower(description), "red hat"):
 				return "RHEL9", nil
-			case strings.Contains(strings.ToLower(name), "ubuntu") || 
-				 strings.Contains(strings.ToLower(description), "ubuntu"):
+			case strings.Contains(strings.ToLower(name), "ubuntu") ||
+				strings.Contains(strings.ToLower(description), "ubuntu"):
 				return "Ubuntu", nil
 			}
 		}
@@ -677,10 +677,10 @@ func (s *Service) BackupInstance(ctx context.Context, instanceID string) error {
 
 // InstanceConfig holds configuration for creating a new instance
 type InstanceConfig struct {
-	Name     string
-	OSType   string
-	Size     string
-	UserID   string
+	Name   string
+	OSType string
+	Size   string
+	UserID string
 }
 
 // InstanceSummary contains information about an instance
@@ -741,7 +741,7 @@ func (s *Service) ListUserInstances(ctx context.Context, userID string) ([]Insta
 	for _, reservation := range result.Reservations {
 		for _, instance := range reservation.Instances {
 			instanceID := aws.ToString(instance.InstanceId)
-			
+
 			// Get OS type
 			osType, err := s.GetInstanceOSType(ctx, instanceID)
 			if err != nil {
@@ -923,18 +923,18 @@ func (s *Service) CheckMigrationStatus(ctx context.Context, userID string) (*Mig
 	}
 
 	status := &MigrationStatus{
-		InstanceID:        instanceID,
-		OSType:           osType,
-		CurrentAMI:       currentAMI,
-		LatestAMI:        latestAMI,
-		NeedsMigration:   currentAMI != latestAMI,
-		CurrentAMIInfo:   currentAMIDetails,
-		LatestAMIInfo:    latestAMIDetails,
-		InstanceState:    string(instance.State.Name),
-		InstanceType:     string(instance.InstanceType),
-		LaunchTime:       aws.ToTime(instance.LaunchTime),
-		PrivateIP:        aws.ToString(instance.PrivateIpAddress),
-		PublicIP:         aws.ToString(instance.PublicIpAddress),
+		InstanceID:     instanceID,
+		OSType:         osType,
+		CurrentAMI:     currentAMI,
+		LatestAMI:      latestAMI,
+		NeedsMigration: currentAMI != latestAMI,
+		CurrentAMIInfo: currentAMIDetails,
+		LatestAMIInfo:  latestAMIDetails,
+		InstanceState:  string(instance.State.Name),
+		InstanceType:   string(instance.InstanceType),
+		LaunchTime:     aws.ToTime(instance.LaunchTime),
+		PrivateIP:      aws.ToString(instance.PrivateIpAddress),
+		PublicIP:       aws.ToString(instance.PublicIpAddress),
 	}
 
 	return status, nil
@@ -942,18 +942,18 @@ func (s *Service) CheckMigrationStatus(ctx context.Context, userID string) (*Mig
 
 // MigrationStatus contains information about an instance's migration status
 type MigrationStatus struct {
-	InstanceID      string
-	OSType          string
-	CurrentAMI      string
-	LatestAMI       string
-	NeedsMigration  bool
-	CurrentAMIInfo  *AMIDetails
-	LatestAMIInfo   *AMIDetails
-	InstanceState   string
-	InstanceType    string
-	LaunchTime      time.Time
-	PrivateIP       string
-	PublicIP        string
+	InstanceID     string
+	OSType         string
+	CurrentAMI     string
+	LatestAMI      string
+	NeedsMigration bool
+	CurrentAMIInfo *AMIDetails
+	LatestAMIInfo  *AMIDetails
+	InstanceState  string
+	InstanceType   string
+	LaunchTime     time.Time
+	PrivateIP      string
+	PublicIP       string
 }
 
 // AMIDetails contains information about an AMI

@@ -31,7 +31,7 @@ func SetupTestCommandWithMockClient(cmd *cobra.Command, args []string, mockClien
 		client.SetMockMode(false)
 		client.SetMockClient(nil)
 	}()
-	
+
 	cmd.SetArgs(args)
 	return cmd.Execute()
 }
