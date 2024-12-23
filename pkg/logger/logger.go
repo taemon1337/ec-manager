@@ -7,12 +7,6 @@ import (
 	"sync"
 )
 
-var (
-	logger     *slog.Logger
-	loggerOnce sync.Once
-	mu         sync.RWMutex
-)
-
 // LogLevel represents the logging level
 type LogLevel string
 
@@ -27,29 +21,19 @@ const (
 	ErrorLevel LogLevel = "error"
 )
 
-// Init initializes the logger with the specified level
-func Init(level LogLevel) {
-	loggerOnce.Do(func() {
-		initLogger(level, os.Stdout)
-	})
+// Logger wraps slog.Logger to provide a consistent interface
+type Logger struct {
+	*slog.Logger
 }
 
-// InitWithWriter initializes the logger with a specific writer (useful for testing)
-func InitWithWriter(level LogLevel, w io.Writer) {
-	loggerOnce.Do(func() {
-		initLogger(level, w)
-	})
-}
+var (
+	defaultLogger *Logger
+	loggerOnce   sync.Once
+	mu           sync.RWMutex
+)
 
-// Reset resets the logger state (useful for testing)
-func Reset() {
-	mu.Lock()
-	defer mu.Unlock()
-	logger = nil
-	loggerOnce = sync.Once{}
-}
-
-func initLogger(level LogLevel, w io.Writer) {
+// NewLogger creates a new logger with the specified level and writer
+func NewLogger(level LogLevel, w io.Writer) *Logger {
 	var logLevel slog.Level
 	switch level {
 	case DebugLevel:
@@ -68,45 +52,49 @@ func initLogger(level LogLevel, w io.Writer) {
 		Level: logLevel,
 	}
 	handler := slog.NewTextHandler(w, opts)
-	l := slog.New(handler)
-
-	mu.Lock()
-	logger = l
-	mu.Unlock()
+	return &Logger{slog.New(handler)}
 }
 
-func getLogger() *slog.Logger {
+// Init initializes the default logger with the specified level
+func Init(level LogLevel) {
+	loggerOnce.Do(func() {
+		defaultLogger = NewLogger(level, os.Stdout)
+	})
+}
+
+// Get returns the default logger, initializing it if necessary
+func Get() *Logger {
 	mu.RLock()
-	defer mu.RUnlock()
-	if logger == nil {
+	if defaultLogger == nil {
 		mu.RUnlock()
 		Init(InfoLevel)
 		mu.RLock()
 	}
-	return logger
+	defer mu.RUnlock()
+	return defaultLogger
 }
 
-// Debug logs a debug message
+// Debug logs at debug level
 func Debug(msg string, args ...any) {
-	getLogger().Debug(msg, args...)
+	Get().Debug(msg, args...)
 }
 
-// Info logs an info message
+// Info logs at info level
 func Info(msg string, args ...any) {
-	getLogger().Info(msg, args...)
+	Get().Info(msg, args...)
 }
 
-// Warn logs a warning message
+// Warn logs at warn level
 func Warn(msg string, args ...any) {
-	getLogger().Warn(msg, args...)
+	Get().Warn(msg, args...)
 }
 
-// Error logs an error message
+// Error logs at error level
 func Error(msg string, args ...any) {
-	getLogger().Error(msg, args...)
+	Get().Error(msg, args...)
 }
 
 // With returns a new logger with the given attributes
 func With(args ...any) *slog.Logger {
-	return getLogger().With(args...)
+	return Get().With(args...)
 }

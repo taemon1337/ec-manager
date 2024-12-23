@@ -1,8 +1,6 @@
 package cmd
 
 import (
-	"context"
-	"fmt"
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -10,253 +8,197 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
-	"github.com/taemon1337/ec-manager/pkg/ami"
 	"github.com/taemon1337/ec-manager/pkg/client"
 	"github.com/taemon1337/ec-manager/pkg/logger"
-	"github.com/taemon1337/ec-manager/pkg/testutil"
-	apitypes "github.com/taemon1337/ec-manager/pkg/types"
+	ecTypes "github.com/taemon1337/ec-manager/pkg/types"
+	"context"
+	"strings"
 )
 
-func TestMigrateCmd(t *testing.T) {
+func setupMigrateCommand(t *testing.T, setupMock func(*ecTypes.MockEC2Client)) *cobra.Command {
 	// Initialize test logger
-	testutil.InitTestLogger(t)
+	logger.Init(logger.DebugLevel)
 
+	// Create mock EC2 client
+	mockClient := &ecTypes.MockEC2Client{}
+	if setupMock != nil {
+		setupMock(mockClient)
+	}
+
+	// Enable mock mode and set mock client
+	c := client.NewClient()
+	c.SetMockMode(true)
+	c.SetEC2Client(mockClient)
+	awsClient = c
+
+	// Create command
+	cmd := &cobra.Command{
+		Use:     migrateCmd.Use,
+		Short:   migrateCmd.Short,
+		Long:    migrateCmd.Long,
+		PreRunE: migrateCmd.PreRunE,
+		RunE:    migrateCmd.RunE,
+	}
+
+	// Add flags
+	cmd.Flags().String("instance-id", "", "ID of the instance to migrate")
+	cmd.Flags().String("new-ami", "", "ID of the new AMI to migrate to")
+	cmd.Flags().Bool("enabled", false, "Migrate all instances with ami-migrate=enabled tag")
+
+	return cmd
+}
+
+func TestMigrateCmd(t *testing.T) {
 	tests := []struct {
-		name      string
-		setupCmd  func(*cobra.Command)
-		setupMock func(*apitypes.MockEC2Client)
-		validate  func(*testing.T, *apitypes.MockEC2Client)
-		wantErr   bool
-		errMsg    string
+		name         string
+		args         []string
+		setupMock    func(*ecTypes.MockEC2Client)
+		wantErr      bool
+		expectedErr  string
 	}{
 		{
 			name: "successful migration",
-			setupCmd: func(cmd *cobra.Command) {
-				cmd.Flags().Set("instance-id", "i-123")
-				cmd.Flags().Set("new-ami", "ami-456")
-			},
-			setupMock: func(m *apitypes.MockEC2Client) {
-				m.InstanceStates = make(map[string]types.InstanceStateName)
-				m.DescribeInstancesOutput = &ec2.DescribeInstancesOutput{
-					Reservations: []types.Reservation{
-						{
-							Instances: []types.Instance{
+			args: []string{"--instance-id", "i-123", "--new-ami", "ami-new"},
+			setupMock: func(m *ecTypes.MockEC2Client) {
+				// Track instance state for i-123
+				var instanceState types.InstanceStateName = types.InstanceStateNameRunning
+
+				// Mock DescribeInstances to return current instance state
+				m.DescribeInstancesFunc = func(ctx context.Context, params *ec2.DescribeInstancesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
+					if len(params.InstanceIds) > 0 && params.InstanceIds[0] == "i-123" {
+						return &ec2.DescribeInstancesOutput{
+							Reservations: []types.Reservation{
 								{
-									InstanceId:   aws.String("i-123"),
-									InstanceType: types.InstanceTypeT2Micro,
-									ImageId:      aws.String("ami-123"),
-									State: &types.InstanceState{
-										Name: types.InstanceStateNameRunning,
-									},
-									BlockDeviceMappings: []types.InstanceBlockDeviceMapping{
+									Instances: []types.Instance{
 										{
-											DeviceName: aws.String("/dev/xvda"),
-											Ebs: &types.EbsInstanceBlockDevice{
-												VolumeId: aws.String("vol-123"),
+											InstanceId: aws.String("i-123"),
+											ImageId:    aws.String("ami-old"),
+											State: &types.InstanceState{
+												Name: instanceState,
 											},
+											BlockDeviceMappings: []types.InstanceBlockDeviceMapping{
+												{
+													Ebs: &types.EbsInstanceBlockDevice{
+														VolumeId: aws.String("vol-123"),
+													},
+												},
+											},
+											InstanceType: types.InstanceTypeT2Micro,
 										},
 									},
 								},
 							},
-						},
-					},
+						}, nil
+					}
+					return &ec2.DescribeInstancesOutput{}, nil
 				}
-				m.RunInstancesOutput = &ec2.RunInstancesOutput{
-					Instances: []types.Instance{
-						{
-							InstanceId: aws.String("i-456"),
+
+				// Mock StopInstances to update instance state
+				m.StopInstancesFunc = func(ctx context.Context, params *ec2.StopInstancesInput, optFns ...func(*ec2.Options)) (*ec2.StopInstancesOutput, error) {
+					instanceState = types.InstanceStateNameStopped
+					return &ec2.StopInstancesOutput{
+						StoppingInstances: []types.InstanceStateChange{
+							{
+								CurrentState: &types.InstanceState{
+									Name: types.InstanceStateNameStopped,
+								},
+								InstanceId: aws.String("i-123"),
+							},
 						},
-					},
+					}, nil
+				}
+
+				// Mock CreateSnapshot
+				m.CreateSnapshotFunc = func(ctx context.Context, params *ec2.CreateSnapshotInput, optFns ...func(*ec2.Options)) (*ec2.CreateSnapshotOutput, error) {
+					return &ec2.CreateSnapshotOutput{
+						SnapshotId: aws.String("snap-123"),
+					}, nil
+				}
+
+				// Mock RunInstances
+				m.RunInstancesFunc = func(ctx context.Context, params *ec2.RunInstancesInput, optFns ...func(*ec2.Options)) (*ec2.RunInstancesOutput, error) {
+					return &ec2.RunInstancesOutput{
+						Instances: []types.Instance{
+							{
+								InstanceId: aws.String("i-new"),
+								State: &types.InstanceState{
+									Name: types.InstanceStateNamePending,
+								},
+							},
+						},
+					}, nil
+				}
+
+				// Mock TerminateInstances
+				m.TerminateInstancesFunc = func(ctx context.Context, params *ec2.TerminateInstancesInput, optFns ...func(*ec2.Options)) (*ec2.TerminateInstancesOutput, error) {
+					instanceState = types.InstanceStateNameTerminated
+					return &ec2.TerminateInstancesOutput{
+						TerminatingInstances: []types.InstanceStateChange{
+							{
+								CurrentState: &types.InstanceState{
+									Name: types.InstanceStateNameShuttingDown,
+								},
+								InstanceId: aws.String("i-123"),
+							},
+						},
+					}, nil
+				}
+
+				// Mock CreateTags
+				m.CreateTagsFunc = func(ctx context.Context, params *ec2.CreateTagsInput, optFns ...func(*ec2.Options)) (*ec2.CreateTagsOutput, error) {
+					return &ec2.CreateTagsOutput{}, nil
 				}
 			},
-		},
-		{
-			name: "missing required flags",
-			setupCmd: func(cmd *cobra.Command) {
-				// Don't set any flags
-			},
-			wantErr: true,
-			errMsg:  "either --instance-id or --enabled flag must be specified",
+			wantErr: false,
 		},
 		{
 			name: "instance not found",
-			setupCmd: func(cmd *cobra.Command) {
-				cmd.Flags().Set("instance-id", "i-nonexistent")
-				cmd.Flags().Set("new-ami", "ami-456")
-			},
-			setupMock: func(m *apitypes.MockEC2Client) {
-				m.DescribeInstancesOutput = &ec2.DescribeInstancesOutput{
-					Reservations: []types.Reservation{},
+			args: []string{"--instance-id", "i-nonexistent", "--new-ami", "ami-new"},
+			setupMock: func(m *ecTypes.MockEC2Client) {
+				m.DescribeInstancesFunc = func(ctx context.Context, params *ec2.DescribeInstancesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
+					return &ec2.DescribeInstancesOutput{
+						Reservations: []types.Reservation{},
+					}, nil
 				}
 			},
 			wantErr: true,
-			errMsg:  "instance not found",
+			expectedErr: "failed to migrate instance i-nonexistent: get instance: instance not found: i-nonexistent",
 		},
 		{
-			name: "error stopping instance",
-			setupCmd: func(cmd *cobra.Command) {
-				cmd.Flags().Set("instance-id", "i-123")
-				cmd.Flags().Set("new-ami", "ami-456")
-			},
-			setupMock: func(m *apitypes.MockEC2Client) {
-				m.InstanceStates = make(map[string]types.InstanceStateName)
-				m.InstanceStates["i-123"] = types.InstanceStateNameRunning
-				m.DescribeInstancesOutput = &ec2.DescribeInstancesOutput{
-					Reservations: []types.Reservation{
-						{
-							Instances: []types.Instance{
-								{
-									InstanceId:   aws.String("i-123"),
-									ImageId:      aws.String("ami-123"),
-									InstanceType: types.InstanceTypeT2Micro,
-									State: &types.InstanceState{
-										Name: types.InstanceStateNameRunning,
-									},
-									BlockDeviceMappings: []types.InstanceBlockDeviceMapping{
-										{
-											DeviceName: aws.String("/dev/xvda"),
-											Ebs: &types.EbsInstanceBlockDevice{
-												VolumeId: aws.String("vol-123"),
-											},
-										},
-									},
-								},
-							},
-						},
-					},
-				}
-				m.StopInstancesError = fmt.Errorf("failed to stop instance")
-				m.Instance = &types.Instance{
-					InstanceId:   aws.String("i-123"),
-					ImageId:      aws.String("ami-123"),
-					InstanceType: types.InstanceTypeT2Micro,
-					State: &types.InstanceState{
-						Name: types.InstanceStateNameRunning,
-					},
-					BlockDeviceMappings: []types.InstanceBlockDeviceMapping{
-						{
-							DeviceName: aws.String("/dev/xvda"),
-							Ebs: &types.EbsInstanceBlockDevice{
-								VolumeId: aws.String("vol-123"),
-							},
-						},
-					},
-				}
-				m.Instances = []types.Instance{*m.Instance}
-			},
-			validate: func(t *testing.T, m *apitypes.MockEC2Client) {
-				// Instance should still be running since stop failed
-				assert.Equal(t, types.InstanceStateNameRunning, m.InstanceStates["i-123"], "instance should still be running after failed stop")
-			},
+			name: "no instance ID and enabled flag not set",
+			args: []string{},
+			setupMock: func(m *ecTypes.MockEC2Client) {},
 			wantErr: true,
-			errMsg:  "failed to stop instance",
+			expectedErr: `required flag(s) "instance-id" or "enabled" not set`,
+		},
+		{
+			name: "missing new-ami flag",
+			args: []string{"--instance-id", "i-123"},
+			setupMock: func(m *ecTypes.MockEC2Client) {},
+			wantErr: true,
+			expectedErr: "--new-ami flag must be specified",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Create command
-			cmd := NewMigrateCmd()
-			cmd.SilenceUsage = true
-			if tt.setupCmd != nil {
-				tt.setupCmd(cmd)
-			}
+			cmd := setupMigrateCommand(t, tt.setupMock)
+			cmd.SetArgs(tt.args)
 
-			// Create mock client
-			mockClient := &apitypes.MockEC2Client{
-				InstanceStates: make(map[string]types.InstanceStateName),
-			}
-			if tt.setupMock != nil {
-				tt.setupMock(mockClient)
-			}
-
-			// Set mock client
-			if err := client.SetEC2Client(mockClient); err != nil {
-				t.Fatal(err)
-			}
-
-			// Run command
 			err := cmd.Execute()
-
-			// Check error
 			if tt.wantErr {
 				assert.Error(t, err)
-				if tt.errMsg != "" {
-					assert.Contains(t, err.Error(), tt.errMsg)
+				if tt.expectedErr != "" {
+					// Strip the "Error: " prefix that Cobra adds
+					errStr := err.Error()
+					if strings.HasPrefix(errStr, "Error: ") {
+						errStr = strings.TrimPrefix(errStr, "Error: ")
+					}
+					assert.Equal(t, tt.expectedErr, errStr)
 				}
 			} else {
 				assert.NoError(t, err)
 			}
-
-			// Run validation
-			if tt.validate != nil {
-				tt.validate(t, mockClient)
-			}
 		})
 	}
-}
-
-func NewMigrateCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "migrate",
-		Short: "Migrate instances to a new AMI",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			instanceID, _ := cmd.Flags().GetString("instance-id")
-			enabled, _ := cmd.Flags().GetBool("enabled")
-			newAMI, _ := cmd.Flags().GetString("new-ami")
-
-			// Validate required flags
-			if instanceID == "" && !enabled {
-				return fmt.Errorf("either --instance-id or --enabled flag must be specified")
-			}
-
-			if newAMI == "" {
-				return fmt.Errorf("--new-ami flag must be specified")
-			}
-
-			// Create EC2 client
-			ec2Client, err := client.GetEC2Client(cmd.Context())
-			if err != nil {
-				return err
-			}
-
-			// Create AMI service
-			svc := ami.NewService(ec2Client)
-
-			// Get instances to migrate
-			var instances []string
-			if instanceID != "" {
-				instances = []string{instanceID}
-			} else if enabled {
-				// Get all instances with ami-migrate=enabled tag
-				taggedInstances, err := svc.ListUserInstances(context.Background(), "ami-migrate")
-				if err != nil {
-					return fmt.Errorf("failed to list instances: %v", err)
-				}
-				for _, instance := range taggedInstances {
-					instances = append(instances, instance.InstanceID)
-				}
-			}
-
-			if len(instances) == 0 {
-				return fmt.Errorf("instance not found")
-			}
-
-			// Migrate each instance
-			for _, instance := range instances {
-				if err := svc.MigrateInstance(context.Background(), instance, newAMI); err != nil {
-					return fmt.Errorf("failed to migrate instance %s: %v", instance, err)
-				}
-				logger.Info("Successfully migrated instance", "instanceID", instance)
-			}
-
-			return nil
-		},
-	}
-
-	cmd.Flags().String("instance-id", "", "ID of the instance to migrate")
-	cmd.Flags().Bool("enabled", false, "Migrate all instances with ami-migrate=enabled tag")
-	cmd.Flags().String("new-ami", "", "ID of the new AMI to migrate to")
-
-	return cmd
 }

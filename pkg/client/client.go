@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
-	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -13,117 +11,76 @@ import (
 	"github.com/taemon1337/ec-manager/pkg/types"
 )
 
-// ClientError represents an error from the client package
-type ClientError struct {
-	Message string
-	Err     error
+var defaultClient *Client
+
+type Client struct {
+	cfg        aws.Config
+	ready      bool
+	mockMode   bool
+	mockClient types.EC2Client
 }
 
-func (e *ClientError) Error() string {
-	if e.Err != nil {
-		return fmt.Sprintf("%s: %v", e.Message, e.Err)
-	}
-	return e.Message
+func init() {
+	defaultClient = NewClient()
 }
 
-var (
-	ec2Client types.EC2ClientAPI
-	mockMode  bool
-)
+// NewClient creates a new AWS client
+func NewClient() *Client {
+	return &Client{}
+}
 
 // SetMockMode enables or disables mock mode
 func SetMockMode(enabled bool) {
-	mockMode = enabled
-	if enabled {
-		ec2Client = types.NewMockEC2Client()
-	} else {
-		ec2Client = nil
-	}
+	defaultClient.mockMode = enabled
 }
 
-// GetEC2Client returns an EC2 client for testing or real usage
-func GetEC2Client(ctx context.Context) (types.EC2ClientAPI, error) {
-	// Check if we're in mock mode or test package
-	if mockMode || isTestPackage() {
-		if ec2Client == nil {
-			return nil, &ClientError{Message: "no EC2 client set for mock mode"}
+// SetMockEC2Client sets the mock EC2 client for testing
+func SetMockEC2Client(client types.EC2Client) {
+	defaultClient.mockClient = client
+}
+
+// SetMockMode sets the mock mode for the client
+func (c *Client) SetMockMode(enabled bool) {
+	c.mockMode = enabled
+}
+
+// SetEC2Client sets the EC2 client for the client
+func (c *Client) SetEC2Client(client types.EC2Client) {
+	c.mockClient = client
+}
+
+// GetEC2Client returns an EC2 client
+func (c *Client) GetEC2Client(ctx context.Context) (types.EC2Client, error) {
+	if c.mockMode {
+		if c.mockClient == nil {
+			return nil, fmt.Errorf("mock client not set")
 		}
-		return ec2Client, nil
+		return c.mockClient, nil
 	}
 
-	// Load AWS configuration for real usage
-	cfg, err := LoadAWSConfig(ctx)
-	if err != nil {
-		return nil, &ClientError{Message: "failed to load AWS config", Err: err}
+	if !c.ready {
+		cfg, err := LoadAWSConfig(ctx)
+		if err != nil {
+			return nil, err
+		}
+		c.cfg = cfg
+		c.ready = true
 	}
 
-	return ec2.NewFromConfig(cfg), nil
+	return ec2.NewFromConfig(c.cfg), nil
 }
 
-// LoadAWSConfig loads AWS configuration and validates credentials
+// LoadAWSConfig loads AWS configuration from environment variables or credentials file
 func LoadAWSConfig(ctx context.Context) (aws.Config, error) {
+	// Check if AWS credentials are set
+	if os.Getenv("AWS_ACCESS_KEY_ID") == "" || os.Getenv("AWS_SECRET_ACCESS_KEY") == "" {
+		return config.LoadDefaultConfig(ctx, config.WithRegion("us-west-2"))
+	}
+
 	cfg, err := config.LoadDefaultConfig(ctx)
 	if err != nil {
-		return aws.Config{}, checkCredentialsError(err)
-	}
-
-	// Try to get credentials to verify they exist
-	_, err = cfg.Credentials.Retrieve(ctx)
-	if err != nil {
-		return aws.Config{}, checkCredentialsError(err)
+		return cfg, fmt.Errorf("unable to load AWS config: %w", err)
 	}
 
 	return cfg, nil
-}
-
-// checkCredentialsError enhances credential-related errors with helpful messages
-func checkCredentialsError(err error) error {
-	if err == nil {
-		return nil
-	}
-
-	// Common credential error messages
-	credMissing := "no EC2 IMDS role found"
-	credExpired := "expired credentials"
-
-	if err.Error() == credMissing || err.Error() == credExpired {
-		homeDir, _ := os.UserHomeDir()
-		awsConfigPath := filepath.Join(homeDir, ".aws", "credentials")
-		
-		return fmt.Errorf(`AWS credentials not found or invalid. To fix this:
-
-1. Set up AWS credentials in one of these ways:
-   a. Create credentials file at %s with:
-      [default]
-      aws_access_key_id = YOUR_ACCESS_KEY
-      aws_secret_access_key = YOUR_SECRET_KEY
-      
-   b. Set environment variables:
-      export AWS_ACCESS_KEY_ID=YOUR_ACCESS_KEY
-      export AWS_SECRET_ACCESS_KEY=YOUR_SECRET_KEY
-      
-   c. Configure AWS CLI:
-      aws configure
-
-2. Verify your credentials are valid:
-   aws sts get-caller-identity
-
-Error details: %v`, awsConfigPath, err)
-	}
-
-	return err
-}
-
-// SetEC2Client sets the EC2 client (used for testing)
-func SetEC2Client(client types.EC2ClientAPI) error {
-	if client == nil {
-		return &ClientError{Message: "cannot set nil EC2 client"}
-	}
-	ec2Client = client
-	return nil
-}
-
-// isTestPackage returns true if the code is running in a test package
-func isTestPackage() bool {
-	return strings.HasSuffix(os.Args[0], ".test") || strings.Contains(os.Args[0], "/_test/")
 }

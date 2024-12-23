@@ -4,54 +4,39 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"sync"
 	"time"
+	"sync"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
-	"github.com/taemon1337/ec-manager/pkg/client"
 	"github.com/taemon1337/ec-manager/pkg/config"
 	"github.com/taemon1337/ec-manager/pkg/logger"
-	apitypes "github.com/taemon1337/ec-manager/pkg/types"
+	ecTypes "github.com/taemon1337/ec-manager/pkg/types"
 )
 
-// EC2ClientAPI defines the AWS EC2 client interface
-type EC2ClientAPI interface {
-	DescribeInstances(ctx context.Context, params *ec2.DescribeInstancesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error)
-	CreateTags(ctx context.Context, params *ec2.CreateTagsInput, optFns ...func(*ec2.Options)) (*ec2.CreateTagsOutput, error)
-	DescribeImages(ctx context.Context, params *ec2.DescribeImagesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeImagesOutput, error)
-	CreateSnapshot(ctx context.Context, params *ec2.CreateSnapshotInput, optFns ...func(*ec2.Options)) (*ec2.CreateSnapshotOutput, error)
-	StopInstances(ctx context.Context, params *ec2.StopInstancesInput, optFns ...func(*ec2.Options)) (*ec2.StopInstancesOutput, error)
-	StartInstances(ctx context.Context, params *ec2.StartInstancesInput, optFns ...func(*ec2.Options)) (*ec2.StartInstancesOutput, error)
-	RunInstances(ctx context.Context, params *ec2.RunInstancesInput, optFns ...func(*ec2.Options)) (*ec2.RunInstancesOutput, error)
-	TerminateInstances(ctx context.Context, params *ec2.TerminateInstancesInput, optFns ...func(*ec2.Options)) (*ec2.TerminateInstancesOutput, error)
-	DescribeSnapshots(ctx context.Context, params *ec2.DescribeSnapshotsInput, optFns ...func(*ec2.Options)) (*ec2.DescribeSnapshotsOutput, error)
-	CreateVolume(ctx context.Context, params *ec2.CreateVolumeInput, optFns ...func(*ec2.Options)) (*ec2.CreateVolumeOutput, error)
-	DescribeVolumes(ctx context.Context, params *ec2.DescribeVolumesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeVolumesOutput, error)
-	AttachVolume(ctx context.Context, params *ec2.AttachVolumeInput, optFns ...func(*ec2.Options)) (*ec2.AttachVolumeOutput, error)
-}
+var instanceStateWaiter waiterInterface
 
 // Service provides AMI management operations
 type Service struct {
-	client apitypes.EC2ClientAPI
+	client ecTypes.EC2ClientAPI
 }
 
 // NewService creates a new AMI service
-func NewService(client apitypes.EC2ClientAPI) *Service {
+func NewService(client ecTypes.EC2ClientAPI) *Service {
 	return &Service{
 		client: client,
 	}
 }
 
 // GetAMIWithTag gets an AMI by its tag
-func (s *Service) GetAMIWithTag(ctx context.Context, tagKey, tagValue string) (string, error) {
+func (s *Service) GetAMIWithTag(ctx context.Context, tagKey, tagValue string) (*types.Image, error) {
 	logger.Debug("Looking for AMI", "tagKey", tagKey, "tagValue", tagValue)
 
 	input := &ec2.DescribeImagesInput{
 		Filters: []types.Filter{
 			{
-				Name:   aws.String("tag:" + tagKey),
+				Name:   aws.String(fmt.Sprintf("tag:%s", tagKey)),
 				Values: []string{tagValue},
 			},
 		},
@@ -60,16 +45,16 @@ func (s *Service) GetAMIWithTag(ctx context.Context, tagKey, tagValue string) (s
 	result, err := s.client.DescribeImages(ctx, input)
 	if err != nil {
 		logger.Error("Failed to describe images", "error", err)
-		return "", fmt.Errorf("describe images: %w", err)
+		return nil, fmt.Errorf("describe images: %w", err)
 	}
 
 	if len(result.Images) == 0 {
 		logger.Warn("No AMI found with tag", "tagKey", tagKey, "tagValue", tagValue)
-		return "", fmt.Errorf("no AMI found with tag %s=%s", tagKey, tagValue)
+		return nil, fmt.Errorf("no AMI found with tag %s=%s", tagKey, tagValue)
 	}
 
 	logger.Info("Found AMI", "amiID", *result.Images[0].ImageId)
-	return aws.ToString(result.Images[0].ImageId), nil
+	return &result.Images[0], nil
 }
 
 // TagAMI tags an AMI with the specified key and value
@@ -204,7 +189,7 @@ func (s *Service) startInstance(ctx context.Context, instance types.Instance) er
 	}
 
 	// Wait for instance to start
-	return waitForInstanceState(ctx, aws.ToString(instance.InstanceId), types.InstanceStateNameRunning)
+	return waitForInstanceState(ctx, s.client, aws.ToString(instance.InstanceId), types.InstanceStateNameRunning)
 }
 
 func (s *Service) stopInstance(ctx context.Context, instance types.Instance) error {
@@ -217,7 +202,7 @@ func (s *Service) stopInstance(ctx context.Context, instance types.Instance) err
 	}
 
 	// Wait for instance to stop
-	return waitForInstanceState(ctx, aws.ToString(instance.InstanceId), types.InstanceStateNameStopped)
+	return waitForInstanceState(ctx, s.client, aws.ToString(instance.InstanceId), types.InstanceStateNameStopped)
 }
 
 func (s *Service) upgradeInstance(ctx context.Context, instance types.Instance, newAMI string) error {
@@ -413,14 +398,8 @@ func (s *Service) RestoreInstance(ctx context.Context, instanceID, snapshotID st
 		return fmt.Errorf("failed to create volume: %w", err)
 	}
 
-	// Get EC2 client for waiter
-	ec2Client, err := client.GetEC2Client(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to get EC2 client for waiter: %w", err)
-	}
-
 	// Wait for volume to be available
-	waiter := ec2.NewVolumeAvailableWaiter(ec2Client)
+	waiter := ec2.NewVolumeAvailableWaiter(s.client)
 	if err := waiter.Wait(ctx, &ec2.DescribeVolumesInput{
 		VolumeIds: []string{aws.ToString(volume.VolumeId)},
 	}, config.GetTimeout()); err != nil {
@@ -436,14 +415,8 @@ func (s *Service) RestoreInstance(ctx context.Context, instanceID, snapshotID st
 			return fmt.Errorf("failed to stop instance: %w", err)
 		}
 
-		// Get EC2 client for waiter
-		ec2Client, err := client.GetEC2Client(ctx)
-		if err != nil {
-			return fmt.Errorf("failed to get EC2 client for waiter: %w", err)
-		}
-
 		// Wait for instance to stop
-		stopWaiter := ec2.NewInstanceStoppedWaiter(ec2Client)
+		stopWaiter := ec2.NewInstanceStoppedWaiter(s.client)
 		if err := stopWaiter.Wait(ctx, &ec2.DescribeInstancesInput{
 			InstanceIds: []string{instanceID},
 		}, config.GetTimeout()); err != nil {
@@ -725,6 +698,29 @@ type InstanceSummary struct {
 	NeedsMigrate bool
 }
 
+// FormatInstanceSummary returns a human-readable string of the instance summary
+func (s *InstanceSummary) FormatInstanceSummary() string {
+	var b strings.Builder
+
+	b.WriteString(fmt.Sprintf("Instance: %s (%s)\n", s.Name, s.InstanceID))
+	b.WriteString(fmt.Sprintf("  OS:           %s\n", s.OSType))
+	b.WriteString(fmt.Sprintf("  Size:         %s\n", s.Size))
+	b.WriteString(fmt.Sprintf("  State:        %s\n", s.State))
+	b.WriteString(fmt.Sprintf("  Launch Time:  %s\n", s.LaunchTime.Format(time.RFC3339)))
+	if s.PrivateIP != "" {
+		b.WriteString(fmt.Sprintf("  Private IP:   %s\n", s.PrivateIP))
+	}
+	if s.PublicIP != "" {
+		b.WriteString(fmt.Sprintf("  Public IP:    %s\n", s.PublicIP))
+	}
+	b.WriteString(fmt.Sprintf("  Current AMI:  %s\n", s.CurrentAMI))
+	if s.NeedsMigrate {
+		b.WriteString(fmt.Sprintf("  Latest AMI:   %s (migration available)\n", s.LatestAMI))
+	}
+
+	return b.String()
+}
+
 // ListUserInstances lists all instances owned by the user
 func (s *Service) ListUserInstances(ctx context.Context, userID string) ([]InstanceSummary, error) {
 	input := &ec2.DescribeInstancesInput{
@@ -787,24 +783,26 @@ func (s *Service) ListUserInstances(ctx context.Context, userID string) ([]Insta
 	return summaries, nil
 }
 
-// CreateInstance creates a new EC2 instance for the user
+// CreateInstance creates a new EC2 instance with the given configuration
 func (s *Service) CreateInstance(ctx context.Context, config InstanceConfig) (*InstanceSummary, error) {
+	// Validate size
+	if !isValidSize(config.Size) {
+		return nil, fmt.Errorf("invalid size: %s. Must be one of: small, medium, large, xlarge", config.Size)
+	}
+
 	// Get the latest AMI for the OS type
-	amiID, err := s.GetLatestAMI(ctx, config.OSType)
+	amiInfo, err := s.GetAMIWithTag(ctx, "OS", config.OSType)
 	if err != nil {
 		return nil, fmt.Errorf("get latest AMI: %w", err)
 	}
 
-	// Map size to instance type
-	instanceType, err := s.mapSizeToInstanceType(config.Size)
-	if err != nil {
-		return nil, err
-	}
+	// Get instance type based on size
+	instanceType := getInstanceType(config.Size)
 
 	// Create the instance
 	input := &ec2.RunInstancesInput{
-		ImageId:      aws.String(amiID),
-		InstanceType: instanceType,
+		ImageId:      amiInfo.ImageId,
+		InstanceType: types.InstanceType(instanceType),
 		MinCount:     aws.Int32(1),
 		MaxCount:     aws.Int32(1),
 		TagSpecifications: []types.TagSpecification{
@@ -819,30 +817,27 @@ func (s *Service) CreateInstance(ctx context.Context, config InstanceConfig) (*I
 						Key:   aws.String("Owner"),
 						Value: aws.String(config.UserID),
 					},
-					{
-						Key:   aws.String("ami-migrate"),
-						Value: aws.String("enabled"),
-					},
 				},
 			},
 		},
 	}
 
-	result, err := s.client.RunInstances(ctx, input)
+	output, err := s.client.RunInstances(ctx, input)
 	if err != nil {
-		return nil, fmt.Errorf("run instances: %w", err)
+		return nil, fmt.Errorf("run instance: %w", err)
 	}
 
-	if len(result.Instances) == 0 {
+	if len(output.Instances) == 0 {
 		return nil, fmt.Errorf("no instance created")
 	}
 
-	instance := result.Instances[0]
-	summary := InstanceSummary{
+	instance := output.Instances[0]
+	amiID := aws.ToString(amiInfo.ImageId)
+	return &InstanceSummary{
 		InstanceID:   aws.ToString(instance.InstanceId),
 		Name:         config.Name,
 		OSType:       config.OSType,
-		Size:         string(instance.InstanceType),
+		Size:         config.Size,
 		State:        string(instance.State.Name),
 		LaunchTime:   aws.ToTime(instance.LaunchTime),
 		PrivateIP:    aws.ToString(instance.PrivateIpAddress),
@@ -850,48 +845,32 @@ func (s *Service) CreateInstance(ctx context.Context, config InstanceConfig) (*I
 		CurrentAMI:   amiID,
 		LatestAMI:    amiID,
 		NeedsMigrate: false,
-	}
-
-	return &summary, nil
+	}, nil
 }
 
-// mapSizeToInstanceType maps a friendly size name to an EC2 instance type
-func (s *Service) mapSizeToInstanceType(size string) (types.InstanceType, error) {
-	switch strings.ToLower(size) {
+func isValidSize(size string) bool {
+	validSizes := []string{"small", "medium", "large", "xlarge"}
+	for _, s := range validSizes {
+		if s == size {
+			return true
+		}
+	}
+	return false
+}
+
+func getInstanceType(size string) string {
+	switch size {
 	case "small":
-		return types.InstanceTypeT3Small, nil
+		return "t2.micro"
 	case "medium":
-		return types.InstanceTypeT3Medium, nil
+		return "t2.small"
 	case "large":
-		return types.InstanceTypeT3Large, nil
+		return "t2.medium"
 	case "xlarge":
-		return types.InstanceTypeT3Xlarge, nil
+		return "t2.large"
 	default:
-		return "", fmt.Errorf("invalid size: %s. Must be one of: small, medium, large, xlarge", size)
+		return "t2.micro"
 	}
-}
-
-// FormatInstanceSummary returns a human-readable string of the instance summary
-func (s *InstanceSummary) FormatInstanceSummary() string {
-	var b strings.Builder
-
-	b.WriteString(fmt.Sprintf("Instance: %s (%s)\n", s.Name, s.InstanceID))
-	b.WriteString(fmt.Sprintf("  OS:           %s\n", s.OSType))
-	b.WriteString(fmt.Sprintf("  Size:         %s\n", s.Size))
-	b.WriteString(fmt.Sprintf("  State:        %s\n", s.State))
-	b.WriteString(fmt.Sprintf("  Launch Time:  %s\n", s.LaunchTime.Format(time.RFC3339)))
-	if s.PrivateIP != "" {
-		b.WriteString(fmt.Sprintf("  Private IP:   %s\n", s.PrivateIP))
-	}
-	if s.PublicIP != "" {
-		b.WriteString(fmt.Sprintf("  Public IP:    %s\n", s.PublicIP))
-	}
-	b.WriteString(fmt.Sprintf("  Current AMI:  %s\n", s.CurrentAMI))
-	if s.NeedsMigrate {
-		b.WriteString(fmt.Sprintf("  Latest AMI:   %s (migration available)\n", s.LatestAMI))
-	}
-
-	return b.String()
 }
 
 // CheckMigrationStatus checks if a user's instance needs migration
@@ -1126,28 +1105,28 @@ func (w *terminatedWaiter) Wait(ctx context.Context, params *ec2.DescribeInstanc
 	return w.InstanceTerminatedWaiter.Wait(ctx, params, maxWaitDur)
 }
 
-func waitForInstanceState(ctx context.Context, instanceID string, desiredState types.InstanceStateName) error {
-	ec2Client, err := client.GetEC2Client(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to get EC2 client: %w", err)
-	}
-
+// waitForInstanceState waits for an instance to reach the desired state
+func waitForInstanceState(ctx context.Context, client ecTypes.EC2ClientAPI, instanceID string, desiredState types.InstanceStateName) error {
 	var waiter waiterInterface
+
 	switch desiredState {
 	case types.InstanceStateNameRunning:
-		waiter = &runningWaiter{ec2.NewInstanceRunningWaiter(ec2Client)}
+		waiter = &runningWaiter{ec2.NewInstanceRunningWaiter(client)}
 	case types.InstanceStateNameStopped:
-		waiter = &stoppedWaiter{ec2.NewInstanceStoppedWaiter(ec2Client)}
+		waiter = &stoppedWaiter{ec2.NewInstanceStoppedWaiter(client)}
 	case types.InstanceStateNameTerminated:
-		waiter = &terminatedWaiter{ec2.NewInstanceTerminatedWaiter(ec2Client)}
+		waiter = &terminatedWaiter{ec2.NewInstanceTerminatedWaiter(client)}
 	default:
 		return fmt.Errorf("unsupported instance state: %s", desiredState)
 	}
 
-	maxWaitTime := config.GetTimeout()
-	logger.Debug("Waiting up to", maxWaitTime, "for instance", instanceID, "to reach state", desiredState)
-
-	return waiter.Wait(ctx, &ec2.DescribeInstancesInput{
+	input := &ec2.DescribeInstancesInput{
 		InstanceIds: []string{instanceID},
-	}, maxWaitTime)
+	}
+
+	if err := waiter.Wait(ctx, input, config.GetTimeout()); err != nil {
+		return fmt.Errorf("failed to wait for instance %s to reach state %s: %w", instanceID, desiredState, err)
+	}
+
+	return nil
 }

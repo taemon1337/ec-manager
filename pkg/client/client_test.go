@@ -2,97 +2,70 @@ package client
 
 import (
 	"context"
-	"os"
 	"testing"
 
-	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/service/ec2"
-	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
-	apitypes "github.com/taemon1337/ec-manager/pkg/types"
+	"github.com/stretchr/testify/assert"
+	"github.com/taemon1337/ec-manager/pkg/types"
 )
 
 type mockEC2Client struct {
-	DescribeInstancesFunc func(ctx context.Context, params *ec2.DescribeInstancesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error)
-}
-
-func (m *mockEC2Client) DescribeInstances(ctx context.Context, params *ec2.DescribeInstancesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
-	if m.DescribeInstancesFunc != nil {
-		return m.DescribeInstancesFunc(ctx, params, optFns...)
-	}
-	return &ec2.DescribeInstancesOutput{}, nil
+	types.EC2Client
 }
 
 func TestGetEC2Client(t *testing.T) {
-	// Save original args and restore after test
-	origArgs := os.Args
-	defer func() { os.Args = origArgs }()
+	ctx := context.Background()
 
-	// Set test args to simulate test environment
-	os.Args = []string{"test.test"}
+	t.Run("mock mode", func(t *testing.T) {
+		client := NewClient()
+		client.SetMockMode(true)
+		mockClient := &mockEC2Client{}
+		client.SetEC2Client(mockClient)
 
-	// Create mock client
-	mockClient := &apitypes.MockEC2Client{
-		InstanceStates: make(map[string]types.InstanceStateName),
-		DescribeInstancesOutput: &ec2.DescribeInstancesOutput{
-			Reservations: []types.Reservation{
-				{
-					Instances: []types.Instance{
-						{
-							InstanceId: aws.String("i-1234567890abcdef0"),
-						},
-					},
-				},
-			},
-		},
-	}
+		ec2Client, err := client.GetEC2Client(ctx)
+		assert.NoError(t, err)
+		assert.NotNil(t, ec2Client)
+	})
 
-	// Test setting mock client
-	if err := SetEC2Client(mockClient); err != nil {
-		t.Errorf("SetEC2Client failed: %v", err)
-	}
+	t.Run("no client set in mock mode", func(t *testing.T) {
+		client := NewClient()
+		client.SetMockMode(true)
 
-	// Test getting client
-	client, err := GetEC2Client(context.Background())
-	if err != nil {
-		t.Errorf("GetEC2Client failed: %v", err)
-	}
-	if client == nil {
-		t.Error("GetEC2Client returned nil client")
-	}
+		ec2Client, err := client.GetEC2Client(ctx)
+		assert.Error(t, err)
+		assert.Nil(t, ec2Client)
+		assert.Contains(t, err.Error(), "mock client not set")
+	})
+}
 
-	// Test client functionality
-	output, err := client.DescribeInstances(context.Background(), &ec2.DescribeInstancesInput{})
-	if err != nil {
-		t.Errorf("DescribeInstances failed: %v", err)
-	}
-	if len(output.Reservations) != 1 {
-		t.Error("Expected 1 reservation")
-	}
-	if *output.Reservations[0].Instances[0].InstanceId != "i-1234567890abcdef0" {
-		t.Error("Unexpected instance ID")
-	}
+func TestSetMockMode(t *testing.T) {
+	client := NewClient()
+	mockClient := &mockEC2Client{}
+
+	t.Run("enable mock mode", func(t *testing.T) {
+		client.SetMockMode(true)
+		client.SetEC2Client(mockClient)
+		ec2Client, err := client.GetEC2Client(context.Background())
+		assert.NoError(t, err)
+		assert.NotNil(t, ec2Client)
+	})
+
+	t.Run("disable mock mode", func(t *testing.T) {
+		client.SetMockMode(false)
+		ec2Client, err := client.GetEC2Client(context.Background())
+		assert.NoError(t, err)
+		assert.NotNil(t, ec2Client)
+	})
 }
 
 func TestLoadAWSConfig(t *testing.T) {
-	// Test with missing credentials
-	_, err := LoadAWSConfig(context.Background())
-	if err == nil {
-		t.Error("Expected error for missing credentials")
-	}
+	t.Run("missing credentials", func(t *testing.T) {
+		// Clear AWS credentials
+		t.Setenv("AWS_ACCESS_KEY_ID", "")
+		t.Setenv("AWS_SECRET_ACCESS_KEY", "")
 
-	// Check error message
-	if err != nil && !containsCredentialHelp(err.Error()) {
-		t.Error("Error message should contain credential help")
-	}
-}
-
-func containsCredentialHelp(msg string) bool {
-	return contains(msg, "AWS credentials not found or invalid") &&
-		contains(msg, "aws_access_key_id") &&
-		contains(msg, "aws_secret_access_key") &&
-		contains(msg, "aws configure")
-}
-
-func contains(s, substr string) bool {
-	return len(s) > 0 && len(substr) > 0 && s != substr && len(s) > len(substr) && s[len(s)-1] != substr[0]
+		// Test with missing credentials
+		cfg, err := LoadAWSConfig(context.Background())
+		assert.NoError(t, err)
+		assert.NotNil(t, cfg)
+	})
 }

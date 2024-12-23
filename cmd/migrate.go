@@ -6,17 +6,16 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/taemon1337/ec-manager/pkg/ami"
-	"github.com/taemon1337/ec-manager/pkg/client"
 	"github.com/taemon1337/ec-manager/pkg/logger"
 )
 
 // migrateCmd represents the migrate command
 var migrateCmd = &cobra.Command{
 	Use:   "migrate",
-	Short: "Migrate EC2 instances to a new AMI",
-	Long: `migrate moves EC2 instances to a new AMI. You can specify a single instance
+	Short: "Migrate an EC2 instance to a new AMI",
+	Long: `Migrate an EC2 instance to a new AMI. You can specify a single instance
 using the --instance-id flag, or migrate all instances with the ami-migrate=enabled tag
-by using the --enabled flag. The --new-ami flag is required to specify the target AMI.`,
+by using the --enabled flag.`,
 	PreRunE: func(cmd *cobra.Command, args []string) error {
 		// Validate required flags
 		instanceID, _ := cmd.Flags().GetString("instance-id")
@@ -24,7 +23,7 @@ by using the --enabled flag. The --new-ami flag is required to specify the targe
 		newAMI, _ := cmd.Flags().GetString("new-ami")
 
 		if instanceID == "" && !enabled {
-			return fmt.Errorf("either --instance-id or --enabled flag must be specified")
+			return fmt.Errorf("required flag(s) \"instance-id\" or \"enabled\" not set")
 		}
 
 		if newAMI == "" {
@@ -36,52 +35,40 @@ by using the --enabled flag. The --new-ami flag is required to specify the targe
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger.Info("Starting migration process")
 
+		// Create AMI service with AWS client
+		ctx := cmd.Context()
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		ec2Client, err := awsClient.GetEC2Client(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to get EC2 client: %w", err)
+		}
+		amiService := ami.NewService(ec2Client)
+
 		// Get flag values
 		instanceID, _ := cmd.Flags().GetString("instance-id")
 		enabled, _ := cmd.Flags().GetBool("enabled")
 		newAMI, _ := cmd.Flags().GetString("new-ami")
 
-		// Create AWS clients
-		ctx := cmd.Context()
-		if ctx == nil {
-			ctx = context.Background()
-		}
-		ec2Client, err := client.GetEC2Client(ctx)
-		if err != nil {
-			return fmt.Errorf("failed to get EC2 client: %w", err)
-		}
-
-		// Create AMI service
-		svc := ami.NewService(ec2Client)
-
-		// Get instances to migrate
-		var instances []string
+		// Check if we're migrating a single instance or all enabled instances
 		if instanceID != "" {
-			instances = []string{instanceID}
-		} else if enabled {
-			// Get all instances with ami-migrate=enabled tag
-			taggedInstances, err := svc.ListUserInstances(ctx, "ami-migrate")
-			if err != nil {
-				return fmt.Errorf("failed to list instances: %v", err)
+			if err := amiService.MigrateInstance(ctx, instanceID, newAMI); err != nil {
+				return fmt.Errorf("failed to migrate instance %s: %v", instanceID, err)
 			}
-			for _, instance := range taggedInstances {
-				instances = append(instances, instance.InstanceID)
-			}
+			logger.Info("Successfully migrated instance", "instanceID", instanceID)
+			return nil
 		}
 
-		if len(instances) == 0 {
-			return fmt.Errorf("no instances found to migrate")
-		}
-
-		// Migrate each instance
-		for _, instance := range instances {
-			if err := svc.MigrateInstance(ctx, instance, newAMI); err != nil {
-				return fmt.Errorf("failed to migrate instance %s: %v", instance, err)
+		// Migrate all enabled instances
+		if enabled {
+			if err := amiService.MigrateInstances(ctx, "enabled"); err != nil {
+				return fmt.Errorf("failed to migrate instances: %v", err)
 			}
-			logger.Info("Successfully migrated instance", "instanceID", instance)
+			return nil
 		}
 
-		return nil
+		return fmt.Errorf("either --instance-id or --enabled flag must be set")
 	},
 }
 

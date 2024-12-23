@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/taemon1337/ec-manager/pkg/client"
 	"github.com/taemon1337/ec-manager/pkg/config"
 	"github.com/taemon1337/ec-manager/pkg/logger"
 )
@@ -19,7 +20,14 @@ var (
 	logLevel   string
 	timeout    time.Duration
 	defaultTimeout = 5 * time.Minute
+
+	// AWS client
+	awsClient *client.Client
 )
+
+func init() {
+	awsClient = client.NewClient()
+}
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
@@ -32,10 +40,42 @@ It provides commands for:
 - Migrating instances to new AMIs
 - Managing instance backups
 - Cleaning up unused instances`,
-	Run: func(cmd *cobra.Command, args []string) {
-		cmd.Help()
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if len(args) == 0 {
+			return cmd.Help()
+		}
+		// Find the command
+		c, _, err := cmd.Root().Find(args)
+		if err != nil {
+			return fmt.Errorf("unknown command %q", args[0])
+		}
+		return c.Help()
 	},
-	Args: cobra.MinimumNArgs(1),
+	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		// Initialize logger
+		logLevel := cmd.Flag("log-level").Value.String()
+		logger.Init(logger.LogLevel(logLevel))
+
+		// Set mock mode if enabled
+		mock, err := cmd.Flags().GetBool("mock")
+		if err != nil {
+			return fmt.Errorf("failed to get mock flag: %w", err)
+		}
+		if mock {
+			awsClient.SetMockMode(true)
+		}
+		return nil
+	},
+	SilenceUsage: true, // Don't show usage on errors
+	ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		var comps []string
+		for _, c := range cmd.Root().Commands() {
+			if !c.Hidden {
+				comps = append(comps, c.Name())
+			}
+		}
+		return comps, cobra.ShellCompDirectiveNoFileComp
+	},
 }
 
 // helpCmd represents the help command
@@ -85,14 +125,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&userID, "user", "", "Your AWS username (defaults to current AWS user)")
 	rootCmd.PersistentFlags().StringVar(&logLevel, "log-level", "info", "Log level (debug, info, warn, error)")
 	rootCmd.PersistentFlags().DurationVar(&timeout, "timeout", defaultTimeout, "Timeout for AWS operations")
-
-	// Initialize logger
-	cobra.OnInitialize(initLogger)
-}
-
-// initLogger initializes the logger with the specified log level
-func initLogger() {
-	logger.Init(logger.LogLevel(logLevel))
+	rootCmd.PersistentFlags().Bool("mock", false, "Enable mock mode")
 }
 
 // getUserID returns the user ID, either from flag or AWS credentials
