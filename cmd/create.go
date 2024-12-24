@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/spf13/cobra"
 	"github.com/taemon1337/ec-manager/pkg/ami"
@@ -24,7 +25,21 @@ var CreateCmd = &cobra.Command{
 			UserData:     userData,
 		}
 
-		return amiService.CreateInstance(ctx, cfg)
+		instanceID, err := amiService.CreateInstance(ctx, cfg)
+		if err != nil {
+			return err
+		}
+
+		fmt.Printf("Created instance %s with:\n", instanceID)
+		fmt.Printf("  Image ID: %s\n", imageID)
+		fmt.Printf("  Instance Type: %s\n", instanceType)
+		fmt.Printf("  Key Name: %s\n", keyName)
+		fmt.Printf("  Subnet ID: %s\n", subnetID)
+		if userData != "" {
+			fmt.Println("  User Data: [provided]")
+		}
+
+		return nil
 	},
 }
 

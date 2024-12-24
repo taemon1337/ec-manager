@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/spf13/cobra"
 	"github.com/taemon1337/ec-manager/pkg/ami"
@@ -15,7 +16,14 @@ var DeleteCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 		amiService := ami.NewService(awsClient.GetEC2Client())
-		return amiService.DeleteInstance(ctx, deleteInstanceID)
+		
+		state, err := amiService.DeleteInstance(ctx, deleteInstanceID)
+		if err != nil {
+			return err
+		}
+
+		fmt.Printf("Instance %s is being terminated (current state: %s)\n", deleteInstanceID, state)
+		return nil
 	},
 }
 

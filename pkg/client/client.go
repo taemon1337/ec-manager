@@ -56,14 +56,12 @@ func NewClient(cfg *Config) (*Client, error) {
 	var ec2Client ecTypes.EC2Client
 
 	if cfg.MockMode {
-		// In mock mode, always create a mock client
 		ec2Client = mock.NewMockEC2Client()
 		return &Client{
 			EC2Client: ec2Client,
 		}, nil
 	}
 
-	// Only try to load AWS config if not in mock mode
 	awsCfg, err := loadAWSConfig(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load AWS config: %w", err)

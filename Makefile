@@ -32,7 +32,7 @@ DOCKER_RUN_OPTS=--rm \
 	--user $(UID):$(GID)
 
 # PHONY targets
-.PHONY: all build clean test lint docker-build docker-test docker-tidy fmt help
+.PHONY: all build clean test lint docker-build docker-test docker-tidy fmt help mock-test
 
 # Default target
 all: clean build test
@@ -50,6 +50,7 @@ help:
 	@echo "  make docker-test  - Run tests in Docker"
 	@echo "  make docker-tidy - Run go mod tidy in Docker"
 	@echo "  make shell      - Open a shell in the Docker container"
+	@echo "  make mock-test  - Run commands with mock data"
 
 # Build the binary
 build:
@@ -121,3 +122,14 @@ init:
 			golang:$(GO_VERSION)-alpine \
 			go mod init github.com/taemon1337/ami-migrate; \
 	fi
+
+# Run commands with mock data
+mock-test: build
+	@echo "Running commands with mock data..."
+	./$(BINARY_NAME) list --mock
+	./$(BINARY_NAME) check-migrate --mock
+	./$(BINARY_NAME) create --mock --image ami-123 --type t2.micro --key test-key --subnet subnet-123
+	./$(BINARY_NAME) backup --mock --instance i-123
+	./$(BINARY_NAME) migrate --mock --instance i-123 --new-ami ami-456
+	./$(BINARY_NAME) restore --mock --instance i-123 --snapshot snap-123
+	./$(BINARY_NAME) delete --mock --instance i-123

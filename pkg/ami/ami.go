@@ -52,49 +52,52 @@ func NewService(client EC2Client) *Service {
 	}
 }
 
-// BackupInstance creates a backup of an EC2 instance by creating an AMI
-func (s *Service) BackupInstance(ctx context.Context, instanceID string) error {
+// BackupInstance creates a backup AMI of the given instance
+func (s *Service) BackupInstance(ctx context.Context, instanceID string) (string, error) {
 	// First, describe the instance to make sure it exists
 	describeOutput, err := s.client.DescribeInstances(ctx, &ec2.DescribeInstancesInput{
 		InstanceIds: []string{instanceID},
 	})
 	if err != nil {
-		return fmt.Errorf("failed to describe instance: %w", err)
+		return "", fmt.Errorf("failed to describe instance: %w", err)
 	}
 
 	if len(describeOutput.Reservations) == 0 || len(describeOutput.Reservations[0].Instances) == 0 {
-		return fmt.Errorf("instance not found: %s", instanceID)
+		return "", fmt.Errorf("instance not found: %s", instanceID)
 	}
 
 	// Create an AMI from the instance
-	amiName := fmt.Sprintf("backup-%s-%s", instanceID, time.Now().Format("20060102150405"))
-	output, err := s.client.CreateImage(ctx, &ec2.CreateImageInput{
+	createImageOutput, err := s.client.CreateImage(ctx, &ec2.CreateImageInput{
 		InstanceId: aws.String(instanceID),
-		Name:      aws.String(amiName),
+		Name:      aws.String(fmt.Sprintf("backup-%s-%s", instanceID, time.Now().Format("2006-01-02-15-04-05"))),
 	})
 	if err != nil {
-		return fmt.Errorf("failed to create AMI: %w", err)
+		return "", fmt.Errorf("failed to create AMI: %w", err)
 	}
 
-	// Add tags to the AMI
+	// Tag the AMI
 	_, err = s.client.CreateTags(ctx, &ec2.CreateTagsInput{
-		Resources: []string{*output.ImageId},
+		Resources: []string{*createImageOutput.ImageId},
 		Tags: []types.Tag{
 			{
 				Key:   aws.String("Name"),
-				Value: aws.String(amiName),
+				Value: aws.String(fmt.Sprintf("Backup of %s", instanceID)),
+			},
+			{
+				Key:   aws.String("SourceInstanceId"),
+				Value: aws.String(instanceID),
 			},
 		},
 	})
 	if err != nil {
-		return fmt.Errorf("failed to tag AMI: %w", err)
+		return "", fmt.Errorf("failed to tag AMI: %w", err)
 	}
 
-	return nil
+	return *createImageOutput.ImageId, nil
 }
 
 // CreateInstance creates a new EC2 instance with the given configuration
-func (s *Service) CreateInstance(ctx context.Context, cfg InstanceConfig) error {
+func (s *Service) CreateInstance(ctx context.Context, cfg InstanceConfig) (string, error) {
 	input := &ec2.RunInstancesInput{
 		ImageId:      aws.String(cfg.ImageID),
 		InstanceType: types.InstanceType(cfg.InstanceType),
@@ -110,60 +113,93 @@ func (s *Service) CreateInstance(ctx context.Context, cfg InstanceConfig) error 
 
 	output, err := s.client.RunInstances(ctx, input)
 	if err != nil {
-		return fmt.Errorf("failed to create instance: %w", err)
+		return "", fmt.Errorf("failed to create instance: %w", err)
 	}
 
 	if len(output.Instances) == 0 {
-		return fmt.Errorf("no instance was created")
+		return "", fmt.Errorf("no instance was created")
 	}
 
-	return nil
+	return *output.Instances[0].InstanceId, nil
 }
 
 // MigrateInstance migrates an EC2 instance to a new AMI
-func (s *Service) MigrateInstance(ctx context.Context, instanceID string, newAMI string) error {
+func (s *Service) MigrateInstance(ctx context.Context, instanceID string, newAMI string) (string, error) {
 	// First, describe the instance to make sure it exists
 	describeOutput, err := s.client.DescribeInstances(ctx, &ec2.DescribeInstancesInput{
 		InstanceIds: []string{instanceID},
 	})
 	if err != nil {
-		return fmt.Errorf("failed to describe instance: %w", err)
+		return "", fmt.Errorf("failed to describe instance: %w", err)
 	}
 
 	if len(describeOutput.Reservations) == 0 || len(describeOutput.Reservations[0].Instances) == 0 {
-		return fmt.Errorf("instance not found: %s", instanceID)
+		return "", fmt.Errorf("instance not found: %s", instanceID)
 	}
 
 	instance := describeOutput.Reservations[0].Instances[0]
 
-	// Launch a new instance with the new AMI
-	runOutput, err := s.client.RunInstances(ctx, &ec2.RunInstancesInput{
-		ImageId:      aws.String(newAMI),
-		InstanceType: instance.InstanceType,
-		MinCount:     aws.Int32(1),
-		MaxCount:     aws.Int32(1),
+	// Create a new instance from the AMI with the same configuration
+	cfg := InstanceConfig{
+		ImageID:      newAMI,
+		InstanceType: string(instance.InstanceType),
+		KeyName:      *instance.KeyName,
+		SubnetID:     *instance.SubnetId,
+	}
+
+	newInstanceID, err := s.CreateInstance(ctx, cfg)
+	if err != nil {
+		return "", fmt.Errorf("failed to create new instance: %w", err)
+	}
+
+	// Tag the new instance
+	_, err = s.client.CreateTags(ctx, &ec2.CreateTagsInput{
+		Resources: []string{newInstanceID},
+		Tags: []types.Tag{
+			{
+				Key:   aws.String("Name"),
+				Value: aws.String(fmt.Sprintf("Migrated from %s", instanceID)),
+			},
+			{
+				Key:   aws.String("SourceInstanceId"),
+				Value: aws.String(instanceID),
+			},
+		},
 	})
 	if err != nil {
-		return fmt.Errorf("failed to launch new instance: %w", err)
+		return "", fmt.Errorf("failed to tag new instance: %w", err)
 	}
 
-	if len(runOutput.Instances) == 0 {
-		return fmt.Errorf("no instance was created")
-	}
-
-	return nil
+	return newInstanceID, nil
 }
 
 // DeleteInstance terminates an EC2 instance
-func (s *Service) DeleteInstance(ctx context.Context, instanceID string) error {
-	_, err := s.client.TerminateInstances(ctx, &ec2.TerminateInstancesInput{
+func (s *Service) DeleteInstance(ctx context.Context, instanceID string) (string, error) {
+	// First, describe the instance to make sure it exists
+	describeOutput, err := s.client.DescribeInstances(ctx, &ec2.DescribeInstancesInput{
 		InstanceIds: []string{instanceID},
 	})
 	if err != nil {
-		return fmt.Errorf("failed to terminate instance: %w", err)
+		return "", fmt.Errorf("failed to describe instance: %w", err)
 	}
 
-	return nil
+	if len(describeOutput.Reservations) == 0 || len(describeOutput.Reservations[0].Instances) == 0 {
+		return "", fmt.Errorf("instance not found: %s", instanceID)
+	}
+
+	// Terminate the instance
+	terminateOutput, err := s.client.TerminateInstances(ctx, &ec2.TerminateInstancesInput{
+		InstanceIds: []string{instanceID},
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to terminate instance: %w", err)
+	}
+
+	if len(terminateOutput.TerminatingInstances) == 0 {
+		return "", fmt.Errorf("instance was not terminated")
+	}
+
+	return string(terminateOutput.TerminatingInstances[0].CurrentState.Name), nil
 }
 
 // DescribeInstances returns a list of all EC2 instances

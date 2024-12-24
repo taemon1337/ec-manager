@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/spf13/cobra"
 	"github.com/taemon1337/ec-manager/pkg/ami"
@@ -15,7 +16,14 @@ var BackupCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 		amiService := ami.NewService(awsClient.GetEC2Client())
-		return amiService.BackupInstance(ctx, backupInstanceID)
+		
+		imageID, err := amiService.BackupInstance(ctx, backupInstanceID)
+		if err != nil {
+			return err
+		}
+
+		fmt.Printf("Created backup AMI %s for instance %s\n", imageID, backupInstanceID)
+		return nil
 	},
 }
 

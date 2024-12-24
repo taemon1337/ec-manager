@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/spf13/cobra"
 	"github.com/taemon1337/ec-manager/pkg/ami"
@@ -16,7 +17,13 @@ var MigrateCmd = &cobra.Command{
 		ctx := context.Background()
 		amiService := ami.NewService(awsClient.GetEC2Client())
 
-		return amiService.MigrateInstance(ctx, migrateInstanceID, newAMI)
+		newInstanceID, err := amiService.MigrateInstance(ctx, migrateInstanceID, newAMI)
+		if err != nil {
+			return err
+		}
+
+		fmt.Printf("Successfully migrated instance %s to new instance %s using AMI %s\n", migrateInstanceID, newInstanceID, newAMI)
+		return nil
 	},
 }
 

@@ -49,12 +49,21 @@ func NewMockEC2Client() *MockEC2Client {
 				{
 					Instances: []types.Instance{
 						{
-							InstanceId: aws.String("i-123"),
+							InstanceId:   aws.String("i-123"),
+							InstanceType: types.InstanceTypeT2Micro,
+							KeyName:      aws.String("test-key"),
+							SubnetId:     aws.String("subnet-123"),
 							State: &types.InstanceState{
 								Name: types.InstanceStateNameRunning,
 							},
 							Placement: &types.Placement{
 								AvailabilityZone: aws.String("us-west-2a"),
+							},
+							Tags: []types.Tag{
+								{
+									Key:   aws.String("ami-migrate"),
+									Value: aws.String("enabled"),
+								},
 							},
 						},
 					},
@@ -81,6 +90,30 @@ func NewMockEC2Client() *MockEC2Client {
 				},
 			},
 		},
+		CreateImageOutput: &ec2.CreateImageOutput{
+			ImageId: aws.String("ami-123"),
+		},
+		CreateTagsOutput: &ec2.CreateTagsOutput{},
+		RunInstancesOutput: &ec2.RunInstancesOutput{
+			Instances: []types.Instance{
+				{
+					InstanceId: aws.String("i-123"),
+					State: &types.InstanceState{
+						Name: types.InstanceStateNamePending,
+					},
+				},
+			},
+		},
+		TerminateInstancesOutput: &ec2.TerminateInstancesOutput{
+			TerminatingInstances: []types.InstanceStateChange{
+				{
+					CurrentState: &types.InstanceState{
+						Name: types.InstanceStateNameShuttingDown,
+					},
+					InstanceId: aws.String("i-123"),
+				},
+			},
+		},
 		CreateVolumeOutput: &ec2.CreateVolumeOutput{
 			VolumeId: aws.String("vol-123"),
 		},
@@ -98,16 +131,14 @@ func NewMockEC2Client() *MockEC2Client {
 			VolumeId:   aws.String("vol-123"),
 			State:      types.VolumeAttachmentStateAttached,
 		},
+		CreateSnapshotOutput: &ec2.CreateSnapshotOutput{
+			SnapshotId: aws.String("snap-123"),
+		},
 		DescribeSnapshotsOutput: &ec2.DescribeSnapshotsOutput{
 			Snapshots: []types.Snapshot{
 				{
 					SnapshotId: aws.String("snap-123"),
-					Tags: []types.Tag{
-						{
-							Key:   aws.String("ami-migrate-device"),
-							Value: aws.String("/dev/sda1"),
-						},
-					},
+					State:      types.SnapshotStateCompleted,
 				},
 			},
 		},

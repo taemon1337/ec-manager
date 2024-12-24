@@ -180,8 +180,9 @@ func TestBackupInstance(t *testing.T) {
 		}
 
 		ctx := context.Background()
-		err := svc.BackupInstance(ctx, "i-1234567890abcdef0")
+		imageID, err := svc.BackupInstance(ctx, "i-1234567890abcdef0")
 		assert.NoError(t, err)
+		assert.Equal(t, "ami-1234567890abcdef0", imageID)
 	})
 
 	t.Run("error", func(t *testing.T) {
@@ -193,13 +194,75 @@ func TestBackupInstance(t *testing.T) {
 		}
 
 		ctx := context.Background()
-		err := svc.BackupInstance(ctx, "i-1234567890abcdef0")
+		imageID, err := svc.BackupInstance(ctx, "i-1234567890abcdef0")
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "API error")
+		assert.Empty(t, imageID)
 	})
 }
 
 func TestMigrateInstance(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		mockClient := &mockEC2Client{}
+		svc := NewService(mockClient)
+
+		mockClient.DescribeInstancesFunc = func(ctx context.Context, params *ec2.DescribeInstancesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
+			return &ec2.DescribeInstancesOutput{
+				Reservations: []types.Reservation{
+					{
+						Instances: []types.Instance{
+							{
+								InstanceId:   aws.String("i-1234567890abcdef0"),
+								InstanceType: types.InstanceTypeT2Micro,
+								KeyName:      aws.String("test-key"),
+								SubnetId:     aws.String("subnet-123"),
+								State: &types.InstanceState{
+									Name: types.InstanceStateNameRunning,
+								},
+							},
+						},
+					},
+				},
+			}, nil
+		}
+
+		mockClient.RunInstancesFunc = func(ctx context.Context, params *ec2.RunInstancesInput, optFns ...func(*ec2.Options)) (*ec2.RunInstancesOutput, error) {
+			return &ec2.RunInstancesOutput{
+				Instances: []types.Instance{
+					{
+						InstanceId: aws.String("i-0987654321fedcba0"),
+					},
+				},
+			}, nil
+		}
+
+		mockClient.CreateTagsFunc = func(ctx context.Context, params *ec2.CreateTagsInput, optFns ...func(*ec2.Options)) (*ec2.CreateTagsOutput, error) {
+			return &ec2.CreateTagsOutput{}, nil
+		}
+
+		ctx := context.Background()
+		newInstanceID, err := svc.MigrateInstance(ctx, "i-1234567890abcdef0", "ami-1234567890abcdef0")
+		assert.NoError(t, err)
+		assert.Equal(t, "i-0987654321fedcba0", newInstanceID)
+	})
+
+	t.Run("error", func(t *testing.T) {
+		mockClient := &mockEC2Client{}
+		svc := NewService(mockClient)
+
+		mockClient.DescribeInstancesFunc = func(ctx context.Context, params *ec2.DescribeInstancesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
+			return nil, fmt.Errorf("API error")
+		}
+
+		ctx := context.Background()
+		newInstanceID, err := svc.MigrateInstance(ctx, "i-1234567890abcdef0", "ami-1234567890abcdef0")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "API error")
+		assert.Empty(t, newInstanceID)
+	})
+}
+
+func TestDeleteInstance(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		mockClient := &mockEC2Client{}
 		svc := NewService(mockClient)
@@ -221,47 +284,6 @@ func TestMigrateInstance(t *testing.T) {
 			}, nil
 		}
 
-		mockClient.CreateImageFunc = func(ctx context.Context, params *ec2.CreateImageInput, optFns ...func(*ec2.Options)) (*ec2.CreateImageOutput, error) {
-			return &ec2.CreateImageOutput{
-				ImageId: aws.String("ami-1234567890abcdef0"),
-			}, nil
-		}
-
-		mockClient.RunInstancesFunc = func(ctx context.Context, params *ec2.RunInstancesInput, optFns ...func(*ec2.Options)) (*ec2.RunInstancesOutput, error) {
-			return &ec2.RunInstancesOutput{
-				Instances: []types.Instance{
-					{
-						InstanceId: aws.String("i-1234567890abcdef1"),
-					},
-				},
-			}, nil
-		}
-
-		ctx := context.Background()
-		err := svc.MigrateInstance(ctx, "i-1234567890abcdef0", "ami-new")
-		assert.NoError(t, err)
-	})
-
-	t.Run("error", func(t *testing.T) {
-		mockClient := &mockEC2Client{}
-		svc := NewService(mockClient)
-
-		mockClient.DescribeInstancesFunc = func(ctx context.Context, params *ec2.DescribeInstancesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
-			return nil, fmt.Errorf("API error")
-		}
-
-		ctx := context.Background()
-		err := svc.MigrateInstance(ctx, "i-1234567890abcdef0", "ami-new")
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "API error")
-	})
-}
-
-func TestDeleteInstance(t *testing.T) {
-	t.Run("success", func(t *testing.T) {
-		mockClient := &mockEC2Client{}
-		svc := NewService(mockClient)
-
 		mockClient.TerminateInstancesFunc = func(ctx context.Context, params *ec2.TerminateInstancesInput, optFns ...func(*ec2.Options)) (*ec2.TerminateInstancesOutput, error) {
 			return &ec2.TerminateInstancesOutput{
 				TerminatingInstances: []types.InstanceStateChange{
@@ -276,21 +298,23 @@ func TestDeleteInstance(t *testing.T) {
 		}
 
 		ctx := context.Background()
-		err := svc.DeleteInstance(ctx, "i-1234567890abcdef0")
+		state, err := svc.DeleteInstance(ctx, "i-1234567890abcdef0")
 		assert.NoError(t, err)
+		assert.Equal(t, string(types.InstanceStateNameShuttingDown), state)
 	})
 
 	t.Run("error", func(t *testing.T) {
 		mockClient := &mockEC2Client{}
 		svc := NewService(mockClient)
 
-		mockClient.TerminateInstancesFunc = func(ctx context.Context, params *ec2.TerminateInstancesInput, optFns ...func(*ec2.Options)) (*ec2.TerminateInstancesOutput, error) {
+		mockClient.DescribeInstancesFunc = func(ctx context.Context, params *ec2.DescribeInstancesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
 			return nil, fmt.Errorf("API error")
 		}
 
 		ctx := context.Background()
-		err := svc.DeleteInstance(ctx, "i-1234567890abcdef0")
+		state, err := svc.DeleteInstance(ctx, "i-1234567890abcdef0")
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "API error")
+		assert.Empty(t, state)
 	})
 }
