@@ -21,6 +21,9 @@ var rootCmd = &cobra.Command{
 	Use:   "ecman",
 	Short: "EC2 Manager CLI",
 	Long:  `A CLI tool for managing EC2 instances`,
+	CompletionOptions: cobra.CompletionOptions{
+		DisableDefaultCmd: true,
+	},
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		var err error
 		cfg := client.NewDefaultConfig()

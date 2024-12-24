@@ -125,7 +125,8 @@ init:
 # Run commands with mock data
 mock-test: build
 	@echo "Running commands with mock data..."
-	./$(BINARY_NAME) list --mock
+	./$(BINARY_NAME) list ami --mock
+	./$(BINARY_NAME) list instances --mock
 	./$(BINARY_NAME) check-migrate --mock
 	./$(BINARY_NAME) check credentials --mock
 	./$(BINARY_NAME) create --mock --image ami-123 --type t2.micro --key test-key --subnet subnet-123
