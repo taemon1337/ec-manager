@@ -1018,9 +1018,9 @@ func (s *MigrationStatus) FormatMigrationStatus() string {
 		b.WriteString(fmt.Sprintf("    Name:         %s\n", s.LatestAMIInfo.Name))
 		b.WriteString(fmt.Sprintf("    Created:      %s\n", s.LatestAMIInfo.CreatedDate))
 	}
-	b.WriteString(fmt.Sprintf("\nMigration Needed: %v\n", s.NeedsMigration))
+	b.WriteString(fmt.Sprintf("\nMigration Needed: %v", s.NeedsMigration))
 	if s.NeedsMigration {
-		b.WriteString("\nRun 'ami-migrate migrate' to update your instance to the latest AMI.")
+		b.WriteString("\n\nRun 'ami-migrate migrate' to update your instance to the latest AMI.")
 	}
 
 	return b.String()

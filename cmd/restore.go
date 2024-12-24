@@ -3,10 +3,9 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/spf13/cobra"
 	"github.com/taemon1337/ec-manager/pkg/ami"
+	"github.com/taemon1337/ec-manager/pkg/client"
 )
 
 var (
@@ -15,9 +14,11 @@ var (
 
 var restoreCmd = &cobra.Command{
 	Use:   "restore",
-	Short: "Restore volumes from snapshots",
-	Long: `Restore volumes from snapshots to an instance.
-Requires the snapshot ID and instance ID to restore to.`,
+	Short: "Restore an instance from a snapshot",
+	Long: `Restore an instance from a snapshot.
+		
+		Example:
+		  ecman restore --snapshot-id snap-1234567890abcdef0 --instance-id i-1234567890abcdef0`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if snapshotID == "" {
 			return fmt.Errorf("--snapshot-id is required")
@@ -30,14 +31,12 @@ Requires the snapshot ID and instance ID to restore to.`,
 			return fmt.Errorf("--instance-id is required")
 		}
 
-		// Load AWS configuration
-		cfg, err := config.LoadDefaultConfig(cmd.Context())
+		// Get EC2 client
+		c := client.NewClient()
+		ec2Client, err := c.GetEC2Client(cmd.Context())
 		if err != nil {
-			return fmt.Errorf("unable to load SDK config: %w", err)
+			return fmt.Errorf("get EC2 client: %w", err)
 		}
-
-		// Create EC2 client
-		ec2Client := ec2.NewFromConfig(cfg)
 
 		// Create AMI service
 		amiService := ami.NewService(ec2Client)
@@ -47,7 +46,7 @@ Requires the snapshot ID and instance ID to restore to.`,
 			return fmt.Errorf("failed to restore instance: %w", err)
 		}
 
-		fmt.Println("Restore completed successfully")
+		fmt.Fprintf(cmd.OutOrStdout(), "Instance %s restored from snapshot %s\n", instanceID, snapshotID)
 		return nil
 	},
 }

@@ -13,13 +13,13 @@ import (
 
 var (
 	// Common flags
-	instanceID     string
-	enabled        bool
-	newAMI         string
-	userID         string
-	logLevel       string
-	timeout        time.Duration
-	defaultTimeout = 5 * time.Minute
+	mockMode    bool
+	logLevel    string
+	timeout     time.Duration
+	enabledFlag bool
+	instanceID  string
+	newAMI      string
+	userID      string
 
 	// AWS client
 	awsClient *client.Client
@@ -52,21 +52,15 @@ It provides commands for:
 		return c.Help()
 	},
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		// Initialize logger
-		logLevel := cmd.Flag("log-level").Value.String()
+		// Set up logging
 		logger.Init(logger.LogLevel(logLevel))
 
-		// Set mock mode if enabled
-		mock, err := cmd.Flags().GetBool("mock")
-		if err != nil {
-			return fmt.Errorf("failed to get mock flag: %w", err)
+		// Set up mock mode
+		client.SetMockMode(mockMode)
+		if mockMode {
+			client.SetMockClient(client.NewMockEC2Client())
 		}
-		if mock {
-			client.SetMockMode(true)
-			// Set up default mock client
-			mockClient := client.NewMockEC2Client()
-			client.SetMockClient(mockClient)
-		}
+
 		return nil
 	},
 	SilenceUsage: true, // Don't show usage on errors
@@ -81,54 +75,19 @@ It provides commands for:
 	},
 }
 
-// helpCmd represents the help command
-var helpCmd = &cobra.Command{
-	Use:   "help [command]",
-	Short: "Show help for a command",
-	Long: `Show detailed help and usage information for any command.
-If no command is specified, shows help for all commands.`,
-	Run: func(cmd *cobra.Command, args []string) {
-		if len(args) == 0 {
-			rootCmd.Help()
-			return
-		}
-		// Find the command
-		c, _, err := rootCmd.Find(args)
-		if err != nil {
-			fmt.Printf("Unknown command %q\n", args[0])
-			rootCmd.Help()
-			return
-		}
-		c.Help()
-	},
-	ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-		var comps []string
-		for _, c := range rootCmd.Commands() {
-			if !c.Hidden {
-				comps = append(comps, c.Name())
-			}
-		}
-		return comps, cobra.ShellCompDirectiveNoFileComp
-	},
-}
-
 // Execute adds all child commands to the root command and sets flags appropriately.
 func Execute() error {
 	return rootCmd.Execute()
 }
 
 func init() {
-	// Add help command
-	rootCmd.AddCommand(helpCmd)
-
-	// Add flags that are used by multiple commands
+	rootCmd.PersistentFlags().BoolVar(&mockMode, "mock", false, "Enable mock mode")
+	rootCmd.PersistentFlags().StringVar(&logLevel, "log-level", "info", "Log level (debug, info, warn, error)")
+	rootCmd.PersistentFlags().DurationVar(&timeout, "timeout", 5*time.Minute, "Timeout for AWS operations")
+	rootCmd.PersistentFlags().BoolVar(&enabledFlag, "enabled", false, "Only process instances with ami-migrate=enabled tag")
 	rootCmd.PersistentFlags().StringVar(&instanceID, "instance-id", "", "ID of the EC2 instance")
-	rootCmd.PersistentFlags().BoolVar(&enabled, "enabled", false, "Only process instances with ami-migrate=enabled tag")
 	rootCmd.PersistentFlags().StringVar(&newAMI, "new-ami", "", "ID of the new AMI to migrate to")
 	rootCmd.PersistentFlags().StringVar(&userID, "user", "", "Your AWS username (defaults to current AWS user)")
-	rootCmd.PersistentFlags().StringVar(&logLevel, "log-level", "info", "Log level (debug, info, warn, error)")
-	rootCmd.PersistentFlags().DurationVar(&timeout, "timeout", defaultTimeout, "Timeout for AWS operations")
-	rootCmd.PersistentFlags().Bool("mock", false, "Enable mock mode")
 }
 
 // getUserID returns the user ID, either from flag or AWS credentials
