@@ -11,7 +11,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/taemon1337/ec-manager/pkg/config"
-	ecTypes "github.com/taemon1337/ec-manager/pkg/types"
+	"github.com/taemon1337/ec-manager/pkg/mock"
 )
 
 type mockEC2Client struct {
@@ -103,8 +103,8 @@ func (w *mockWaiter) Wait(ctx context.Context, params *ec2.DescribeInstancesInpu
 	return nil
 }
 
-func setupTest(t *testing.T) (*Service, *ecTypes.MockEC2Client) {
-	mockClient := ecTypes.NewMockEC2Client()
+func setupTest(t *testing.T) (*Service, *mock.MockEC2Client) {
+	mockClient := mock.NewMockEC2Client()
 	svc := NewService(mockClient)
 	// Override the waiter to return immediately
 	instanceStateWaiter = &mockWaiter{}
@@ -114,7 +114,7 @@ func setupTest(t *testing.T) (*Service, *ecTypes.MockEC2Client) {
 func TestGetAMIWithTag(t *testing.T) {
 	tests := []struct {
 		name        string
-		setupMock   func(*ecTypes.MockEC2Client)
+		setupMock   func(*mock.MockEC2Client)
 		tagKey      string
 		tagValue    string
 		wantErr     bool
@@ -122,7 +122,7 @@ func TestGetAMIWithTag(t *testing.T) {
 	}{
 		{
 			name: "found AMI with tag",
-			setupMock: func(m *ecTypes.MockEC2Client) {
+			setupMock: func(m *mock.MockEC2Client) {
 				m.DescribeImagesFunc = func(ctx context.Context, params *ec2.DescribeImagesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeImagesOutput, error) {
 					return &ec2.DescribeImagesOutput{
 						Images: []types.Image{
@@ -139,7 +139,7 @@ func TestGetAMIWithTag(t *testing.T) {
 		},
 		{
 			name: "no AMI found",
-			setupMock: func(m *ecTypes.MockEC2Client) {
+			setupMock: func(m *mock.MockEC2Client) {
 				m.DescribeImagesFunc = func(ctx context.Context, params *ec2.DescribeImagesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeImagesOutput, error) {
 					return &ec2.DescribeImagesOutput{
 						Images: []types.Image{},
@@ -180,7 +180,7 @@ func TestTagAMI(t *testing.T) {
 
 	tests := []struct {
 		name        string
-		setupMock   func(*ecTypes.MockEC2Client)
+		setupMock   func(*mock.MockEC2Client)
 		amiID       string
 		tagKey      string
 		tagValue    string
@@ -189,7 +189,7 @@ func TestTagAMI(t *testing.T) {
 	}{
 		{
 			name: "successful tag",
-			setupMock: func(m *ecTypes.MockEC2Client) {
+			setupMock: func(m *mock.MockEC2Client) {
 				m.CreateTagsFunc = func(ctx context.Context, params *ec2.CreateTagsInput, optFns ...func(*ec2.Options)) (*ec2.CreateTagsOutput, error) {
 					return &ec2.CreateTagsOutput{}, nil
 				}
@@ -201,7 +201,7 @@ func TestTagAMI(t *testing.T) {
 		},
 		{
 			name: "error tagging",
-			setupMock: func(m *ecTypes.MockEC2Client) {
+			setupMock: func(m *mock.MockEC2Client) {
 				m.CreateTagsFunc = func(ctx context.Context, params *ec2.CreateTagsInput, optFns ...func(*ec2.Options)) (*ec2.CreateTagsOutput, error) {
 					return nil, fmt.Errorf("failed to tag AMI")
 				}
@@ -238,7 +238,7 @@ func TestMigrateInstance(t *testing.T) {
 
 	tests := []struct {
 		name        string
-		setupMock   func(*ecTypes.MockEC2Client)
+		setupMock   func(*mock.MockEC2Client)
 		instanceID  string
 		newAMI      string
 		wantErr     bool
@@ -246,7 +246,7 @@ func TestMigrateInstance(t *testing.T) {
 	}{
 		{
 			name: "successful migration",
-			setupMock: func(m *ecTypes.MockEC2Client) {
+			setupMock: func(m *mock.MockEC2Client) {
 				m.DescribeInstancesFunc = func(ctx context.Context, params *ec2.DescribeInstancesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
 					return &ec2.DescribeInstancesOutput{
 						Reservations: []types.Reservation{
@@ -327,7 +327,7 @@ func TestMigrateInstance(t *testing.T) {
 		},
 		{
 			name: "instance not found",
-			setupMock: func(m *ecTypes.MockEC2Client) {
+			setupMock: func(m *mock.MockEC2Client) {
 				m.DescribeInstancesFunc = func(ctx context.Context, params *ec2.DescribeInstancesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
 					return &ec2.DescribeInstancesOutput{
 						Reservations: []types.Reservation{},
@@ -341,7 +341,7 @@ func TestMigrateInstance(t *testing.T) {
 		},
 		{
 			name: "stop instance error",
-			setupMock: func(m *ecTypes.MockEC2Client) {
+			setupMock: func(m *mock.MockEC2Client) {
 				m.DescribeInstancesFunc = func(ctx context.Context, params *ec2.DescribeInstancesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
 					return &ec2.DescribeInstancesOutput{
 						Reservations: []types.Reservation{
@@ -394,14 +394,14 @@ func TestBackupInstance(t *testing.T) {
 
 	tests := []struct {
 		name        string
-		setupMock   func(*ecTypes.MockEC2Client)
+		setupMock   func(*mock.MockEC2Client)
 		instanceID  string
 		wantErr     bool
 		errContains string
 	}{
 		{
 			name: "successful backup",
-			setupMock: func(m *ecTypes.MockEC2Client) {
+			setupMock: func(m *mock.MockEC2Client) {
 				m.DescribeInstancesFunc = func(ctx context.Context, params *ec2.DescribeInstancesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
 					return &ec2.DescribeInstancesOutput{
 						Reservations: []types.Reservation{
@@ -432,7 +432,7 @@ func TestBackupInstance(t *testing.T) {
 		},
 		{
 			name: "instance not found",
-			setupMock: func(m *ecTypes.MockEC2Client) {
+			setupMock: func(m *mock.MockEC2Client) {
 				m.DescribeInstancesFunc = func(ctx context.Context, params *ec2.DescribeInstancesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
 					return &ec2.DescribeInstancesOutput{
 						Reservations: []types.Reservation{},
@@ -467,7 +467,7 @@ func TestBackupInstance(t *testing.T) {
 func TestListUserInstances(t *testing.T) {
 	tests := []struct {
 		name        string
-		setupMock   func(*ecTypes.MockEC2Client)
+		setupMock   func(*mock.MockEC2Client)
 		userID      string
 		wantErr     bool
 		errContains string
@@ -475,7 +475,7 @@ func TestListUserInstances(t *testing.T) {
 	}{
 		{
 			name: "successful list",
-			setupMock: func(m *ecTypes.MockEC2Client) {
+			setupMock: func(m *mock.MockEC2Client) {
 				m.DescribeInstancesFunc = func(ctx context.Context, params *ec2.DescribeInstancesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
 					return &ec2.DescribeInstancesOutput{
 						Reservations: []types.Reservation{
@@ -517,7 +517,7 @@ func TestListUserInstances(t *testing.T) {
 		},
 		{
 			name: "no instances found",
-			setupMock: func(m *ecTypes.MockEC2Client) {
+			setupMock: func(m *mock.MockEC2Client) {
 				m.DescribeInstancesFunc = func(ctx context.Context, params *ec2.DescribeInstancesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
 					return &ec2.DescribeInstancesOutput{
 						Reservations: []types.Reservation{},
@@ -558,14 +558,14 @@ func TestListUserInstances(t *testing.T) {
 func TestCreateInstance(t *testing.T) {
 	tests := []struct {
 		name        string
-		setupMock   func(*ecTypes.MockEC2Client)
+		setupMock   func(*mock.MockEC2Client)
 		config      InstanceConfig
 		wantErr     bool
 		errContains string
 	}{
 		{
 			name: "successful create",
-			setupMock: func(m *ecTypes.MockEC2Client) {
+			setupMock: func(m *mock.MockEC2Client) {
 				m.DescribeImagesFunc = func(ctx context.Context, params *ec2.DescribeImagesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeImagesOutput, error) {
 					return &ec2.DescribeImagesOutput{
 						Images: []types.Image{
@@ -618,7 +618,7 @@ func TestCreateInstance(t *testing.T) {
 		},
 		{
 			name:      "invalid size",
-			setupMock: func(m *ecTypes.MockEC2Client) {},
+			setupMock: func(m *mock.MockEC2Client) {},
 			config: InstanceConfig{
 				Name:   "test-instance",
 				Size:   "invalid",
@@ -660,7 +660,7 @@ func TestDeleteInstance(t *testing.T) {
 
 	tests := []struct {
 		name        string
-		setupMock   func(*ecTypes.MockEC2Client)
+		setupMock   func(*mock.MockEC2Client)
 		userID      string
 		instanceID  string
 		wantErr     bool
@@ -668,7 +668,7 @@ func TestDeleteInstance(t *testing.T) {
 	}{
 		{
 			name: "successful delete",
-			setupMock: func(m *ecTypes.MockEC2Client) {
+			setupMock: func(m *mock.MockEC2Client) {
 				m.DescribeInstancesFunc = func(ctx context.Context, params *ec2.DescribeInstancesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
 					return &ec2.DescribeInstancesOutput{
 						Reservations: []types.Reservation{
@@ -695,7 +695,7 @@ func TestDeleteInstance(t *testing.T) {
 		},
 		{
 			name: "instance not found",
-			setupMock: func(m *ecTypes.MockEC2Client) {
+			setupMock: func(m *mock.MockEC2Client) {
 				m.DescribeInstancesFunc = func(ctx context.Context, params *ec2.DescribeInstancesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
 					return &ec2.DescribeInstancesOutput{
 						Reservations: []types.Reservation{},
@@ -868,7 +868,7 @@ func TestMigrateInstances(t *testing.T) {
 }
 
 func TestAMIService(t *testing.T) {
-	mockClient := ecTypes.NewMockEC2Client()
+	mockClient := mock.NewMockEC2Client()
 	mockClient.DescribeInstancesFunc = func(ctx context.Context, params *ec2.DescribeInstancesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
 		return &ec2.DescribeInstancesOutput{
 			Reservations: []types.Reservation{

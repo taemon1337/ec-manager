@@ -5,46 +5,63 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/spf13/cobra"
 	"github.com/taemon1337/ec-manager/pkg/client"
-	ecTypes "github.com/taemon1337/ec-manager/pkg/types"
+	"github.com/taemon1337/ec-manager/pkg/mock"
 )
 
-// SetupTestCommand is a helper function for setting up test commands
+// SetupMockEC2Client sets up a mock EC2 client for testing
+func SetupMockEC2Client() *mock.MockEC2Client {
+	return mock.NewMockEC2Client()
+}
+
+// GetMockClient returns a client with mock EC2 client
+func GetMockClient() *client.Client {
+	cfg := &client.Config{
+		MockMode: true,
+	}
+	client, err := client.NewClient(cfg)
+	if err != nil {
+		return nil
+	}
+	return client
+}
+
+// CleanupMockEC2Client cleans up the mock EC2 client
+func CleanupMockEC2Client() {
+	// Nothing to clean up for now
+}
+
+// SetupTestCommand sets up a test command with the given arguments
 func SetupTestCommand(cmd *cobra.Command, args []string) error {
 	cmd.SetArgs(args)
 	return cmd.Execute()
 }
 
-// SetupTestCommandWithContext is a helper function for setting up test commands with context
-func SetupTestCommandWithContext(ctx context.Context, cmd *cobra.Command, args []string) error {
-	cmd.SetContext(ctx)
-	cmd.SetArgs(args)
-	return cmd.Execute()
-}
-
-// SetupTestCommandWithMockClient is a helper function for setting up test commands with a mock client
-func SetupTestCommandWithMockClient(cmd *cobra.Command, args []string, mockClient ecTypes.EC2Client) error {
-	client.SetMockMode(true)
-	client.SetMockClient(mockClient)
-	defer func() {
-		client.SetMockMode(false)
-		client.SetMockClient(nil)
-	}()
-
-	cmd.SetArgs(args)
-	return cmd.Execute()
-}
-
-// AssertErrorContains checks if an error message contains a substring
-func AssertErrorContains(t *testing.T, err error, substr string) {
-	t.Helper()
-	if err == nil {
-		t.Errorf("expected error containing %q, got nil", substr)
-		return
+// GetEC2Client retrieves the EC2 client from the command context
+func GetEC2Client(cmd *cobra.Command) ec2.DescribeInstancesAPIClient {
+	// Get the client from the command context
+	ctx := cmd.Context()
+	if ctx == nil {
+		ctx = context.Background()
 	}
-	msg := err.Error()
-	if !strings.Contains(msg, substr) {
-		t.Errorf("expected error containing %q, got %q", substr, msg)
+
+	// Create a new client with mock mode
+	cfg := &client.Config{
+		MockMode: true,
+	}
+	c, err := client.NewClient(cfg)
+	if err != nil {
+		return nil
+	}
+
+	return c.GetEC2Client()
+}
+
+// AssertContains checks if a string contains a substring
+func AssertContains(t *testing.T, s, substr string) {
+	if !strings.Contains(s, substr) {
+		t.Errorf("expected %q to contain %q", s, substr)
 	}
 }

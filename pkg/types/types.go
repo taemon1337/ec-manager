@@ -21,6 +21,10 @@ type EC2Client interface {
 	DescribeSnapshots(ctx context.Context, params *ec2.DescribeSnapshotsInput, optFns ...func(*ec2.Options)) (*ec2.DescribeSnapshotsOutput, error)
 	CreateVolume(ctx context.Context, params *ec2.CreateVolumeInput, optFns ...func(*ec2.Options)) (*ec2.CreateVolumeOutput, error)
 	DescribeVolumes(ctx context.Context, params *ec2.DescribeVolumesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeVolumesOutput, error)
+	NewInstanceRunningWaiter() *ec2.InstanceRunningWaiter
+	NewInstanceStoppedWaiter() *ec2.InstanceStoppedWaiter
+	NewInstanceTerminatedWaiter() *ec2.InstanceTerminatedWaiter
+	NewVolumeAvailableWaiter() *ec2.VolumeAvailableWaiter
 }
 
 // EC2ClientAPI is an alias for EC2Client for backward compatibility

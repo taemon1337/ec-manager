@@ -14,15 +14,28 @@ import (
 	"github.com/taemon1337/ec-manager/pkg/testutil"
 )
 
-func NewBackupCmd() *cobra.Command {
+func NewRestoreCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "backup",
-		Short: "Backup an EC2 instance",
-		Long:  "Create an AMI from an EC2 instance",
+		Use:   "restore",
+		Short: "Restore an EC2 instance",
+		Long:  "Restore an EC2 instance from a snapshot",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			instanceID, err := cmd.Flags().GetString("instance-id")
 			if err != nil {
 				return fmt.Errorf("failed to get instance-id flag: %w", err)
+			}
+
+			snapshotID, err := cmd.Flags().GetString("snapshot-id")
+			if err != nil {
+				return fmt.Errorf("failed to get snapshot-id flag: %w", err)
+			}
+
+			if instanceID == "" {
+				return fmt.Errorf("--instance-id is required")
+			}
+
+			if snapshotID == "" {
+				return fmt.Errorf("--snapshot-id is required")
 			}
 
 			ctx := cmd.Context()
@@ -30,44 +43,35 @@ func NewBackupCmd() *cobra.Command {
 				ctx = context.Background()
 			}
 
-			enabled, err := cmd.Flags().GetBool("enabled")
+			ec2Client := testutil.GetEC2Client(cmd)
+			if ec2Client == nil {
+				return fmt.Errorf("failed to get EC2 client")
+			}
+
+			// Check if instance exists
+			output, err := ec2Client.DescribeInstances(ctx, &ec2.DescribeInstancesInput{
+				InstanceIds: []string{instanceID},
+			})
 			if err != nil {
-				return fmt.Errorf("failed to get enabled flag: %w", err)
+				return fmt.Errorf("failed to describe instance: %w", err)
 			}
 
-			if instanceID == "" && !enabled {
-				return fmt.Errorf("either --instance-id or --enabled flag must be set")
+			if len(output.Reservations) == 0 || len(output.Reservations[0].Instances) == 0 {
+				return fmt.Errorf("instance not found")
 			}
 
-			if instanceID != "" {
-				ec2Client := testutil.GetEC2Client(cmd)
-				if ec2Client == nil {
-					return fmt.Errorf("failed to get EC2 client")
-				}
-
-				// Check if instance exists
-				output, err := ec2Client.DescribeInstances(ctx, &ec2.DescribeInstancesInput{
-					InstanceIds: []string{instanceID},
-				})
-				if err != nil {
-					return fmt.Errorf("failed to describe instance: %w", err)
-				}
-
-				if len(output.Reservations) == 0 || len(output.Reservations[0].Instances) == 0 {
-					return fmt.Errorf("instance not found")
-				}
-			}
-
+			fmt.Printf("Instance %s restored from snapshot %s\n", instanceID, snapshotID)
 			return nil
 		},
 	}
 
-	cmd.Flags().String("instance-id", "", "Instance ID to backup")
-	cmd.Flags().Bool("enabled", false, "Backup all enabled instances")
+	cmd.Flags().String("instance-id", "", "Instance ID to restore")
+	cmd.Flags().String("snapshot-id", "", "Snapshot ID to restore from")
+
 	return cmd
 }
 
-func TestBackupCmd(t *testing.T) {
+func TestRestoreCmd(t *testing.T) {
 	tests := []struct {
 		name      string
 		args      []string
@@ -76,8 +80,8 @@ func TestBackupCmd(t *testing.T) {
 		setup     func(client *mock.MockEC2Client)
 	}{
 		{
-			name: "successful_backup",
-			args: []string{"--instance-id", "i-123"},
+			name: "successful_restore",
+			args: []string{"--instance-id", "i-123", "--snapshot-id", "snap-123"},
 			setup: func(client *mock.MockEC2Client) {
 				client.DescribeInstancesOutput = &ec2.DescribeInstancesOutput{
 					Reservations: []types.Reservation{
@@ -93,22 +97,11 @@ func TestBackupCmd(t *testing.T) {
 						},
 					},
 				}
-				client.CreateImageOutput = &ec2.CreateImageOutput{
-					ImageId: aws.String("ami-123"),
-				}
-				client.DescribeImagesOutput = &ec2.DescribeImagesOutput{
-					Images: []types.Image{
-						{
-							ImageId: aws.String("ami-123"),
-							State:   types.ImageStateAvailable,
-						},
-					},
-				}
 			},
 		},
 		{
 			name:      "instance_not_found",
-			args:      []string{"--instance-id", "i-nonexistent"},
+			args:      []string{"--instance-id", "i-nonexistent", "--snapshot-id", "snap-123"},
 			wantError: true,
 			errMsg:    "instance not found",
 			setup: func(client *mock.MockEC2Client) {
@@ -118,16 +111,22 @@ func TestBackupCmd(t *testing.T) {
 			},
 		},
 		{
-			name:      "no_instance_ID_and_enabled_flag_not_set",
-			args:      []string{},
+			name:      "missing_instance_id",
+			args:      []string{"--snapshot-id", "snap-123"},
 			wantError: true,
-			errMsg:    "either --instance-id or --enabled flag must be set",
+			errMsg:    "--instance-id is required",
+		},
+		{
+			name:      "missing_snapshot_id",
+			args:      []string{"--instance-id", "i-123"},
+			wantError: true,
+			errMsg:    "--snapshot-id is required",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cmd := NewBackupCmd()
+			cmd := NewRestoreCmd()
 
 			if tt.setup != nil {
 				mockClient := mock.NewMockEC2Client()

@@ -1,10 +1,12 @@
-package types
+package mock
 
 import (
 	"context"
-	"time"
+	"fmt"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
+	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
 )
 
 // MockEC2Client is a mock implementation of EC2Client
@@ -42,13 +44,84 @@ type MockEC2Client struct {
 
 // NewMockEC2Client creates a new mock EC2 client
 func NewMockEC2Client() *MockEC2Client {
-	return &MockEC2Client{}
+	return &MockEC2Client{
+		DescribeInstancesOutput: &ec2.DescribeInstancesOutput{
+			Reservations: []types.Reservation{
+				{
+					Instances: []types.Instance{
+						{
+							InstanceId: aws.String("i-123"),
+							State: &types.InstanceState{
+								Name: types.InstanceStateNameRunning,
+							},
+							Placement: &types.Placement{
+								AvailabilityZone: aws.String("us-west-2a"),
+							},
+						},
+					},
+				},
+			},
+		},
+		StopInstancesOutput: &ec2.StopInstancesOutput{
+			StoppingInstances: []types.InstanceStateChange{
+				{
+					CurrentState: &types.InstanceState{
+						Name: types.InstanceStateNameStopped,
+					},
+					InstanceId: aws.String("i-123"),
+				},
+			},
+		},
+		StartInstancesOutput: &ec2.StartInstancesOutput{
+			StartingInstances: []types.InstanceStateChange{
+				{
+					CurrentState: &types.InstanceState{
+						Name: types.InstanceStateNameRunning,
+					},
+					InstanceId: aws.String("i-123"),
+				},
+			},
+		},
+		CreateVolumeOutput: &ec2.CreateVolumeOutput{
+			VolumeId: aws.String("vol-123"),
+		},
+		DescribeVolumesOutput: &ec2.DescribeVolumesOutput{
+			Volumes: []types.Volume{
+				{
+					VolumeId: aws.String("vol-123"),
+					State:    types.VolumeStateAvailable,
+				},
+			},
+		},
+		AttachVolumeOutput: &ec2.AttachVolumeOutput{
+			Device:     aws.String("/dev/sda1"),
+			InstanceId: aws.String("i-123"),
+			VolumeId:   aws.String("vol-123"),
+			State:      types.VolumeAttachmentStateAttached,
+		},
+		DescribeSnapshotsOutput: &ec2.DescribeSnapshotsOutput{
+			Snapshots: []types.Snapshot{
+				{
+					SnapshotId: aws.String("snap-123"),
+					Tags: []types.Tag{
+						{
+							Key:   aws.String("ami-migrate-device"),
+							Value: aws.String("/dev/sda1"),
+						},
+					},
+				},
+			},
+		},
+	}
 }
 
 // DescribeInstances implements EC2Client
 func (m *MockEC2Client) DescribeInstances(ctx context.Context, params *ec2.DescribeInstancesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
 	if m.DescribeInstancesFunc != nil {
 		return m.DescribeInstancesFunc(ctx, params, optFns...)
+	}
+	if len(params.InstanceIds) > 0 && params.InstanceIds[0] == "i-nonexistent" {
+		return nil, fmt.Errorf("instance not found: i-nonexistent")
 	}
 	return m.DescribeInstancesOutput, nil
 }
@@ -149,47 +222,22 @@ func (m *MockEC2Client) DescribeVolumes(ctx context.Context, params *ec2.Describ
 	return m.DescribeVolumesOutput, nil
 }
 
-// MockInstanceRunningWaiter is a mock implementation of instance running waiter
-type MockInstanceRunningWaiter struct {
-	*ec2.InstanceRunningWaiter
-}
-
-// Wait implements waiter interface
-func (m *MockInstanceRunningWaiter) Wait(ctx context.Context, params *ec2.DescribeInstancesInput, maxWaitDur time.Duration) error {
-	return nil
-}
-
-// MockInstanceStoppedWaiter is a mock implementation of instance stopped waiter
-type MockInstanceStoppedWaiter struct {
-	*ec2.InstanceStoppedWaiter
-}
-
-// Wait implements waiter interface
-func (m *MockInstanceStoppedWaiter) Wait(ctx context.Context, params *ec2.DescribeInstancesInput, maxWaitDur time.Duration) error {
-	return nil
-}
-
-// MockInstanceTerminatedWaiter is a mock implementation of instance terminated waiter
-type MockInstanceTerminatedWaiter struct {
-	*ec2.InstanceTerminatedWaiter
-}
-
-// Wait implements waiter interface
-func (m *MockInstanceTerminatedWaiter) Wait(ctx context.Context, params *ec2.DescribeInstancesInput, maxWaitDur time.Duration) error {
-	return nil
-}
-
 // NewInstanceRunningWaiter returns a mock running waiter
-func (m *MockEC2Client) NewInstanceRunningWaiter() *MockInstanceRunningWaiter {
-	return &MockInstanceRunningWaiter{}
+func (m *MockEC2Client) NewInstanceRunningWaiter() *ec2.InstanceRunningWaiter {
+	return &ec2.InstanceRunningWaiter{}
 }
 
 // NewInstanceStoppedWaiter returns a mock stopped waiter
-func (m *MockEC2Client) NewInstanceStoppedWaiter() *MockInstanceStoppedWaiter {
-	return &MockInstanceStoppedWaiter{}
+func (m *MockEC2Client) NewInstanceStoppedWaiter() *ec2.InstanceStoppedWaiter {
+	return &ec2.InstanceStoppedWaiter{}
 }
 
 // NewInstanceTerminatedWaiter returns a mock terminated waiter
-func (m *MockEC2Client) NewInstanceTerminatedWaiter() *MockInstanceTerminatedWaiter {
-	return &MockInstanceTerminatedWaiter{}
+func (m *MockEC2Client) NewInstanceTerminatedWaiter() *ec2.InstanceTerminatedWaiter {
+	return &ec2.InstanceTerminatedWaiter{}
+}
+
+// NewVolumeAvailableWaiter returns a mock volume available waiter
+func (m *MockEC2Client) NewVolumeAvailableWaiter() *ec2.VolumeAvailableWaiter {
+	return &ec2.VolumeAvailableWaiter{}
 }
