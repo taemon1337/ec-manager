@@ -12,6 +12,7 @@ rhel9:
 	@echo "Building RHEL 9 AMI..."
 	docker run --rm -it \
 		-v $(PWD):/workspace \
+		-v $(HOME)/.config/packer:/root/.config/packer \
 		-v $(HOME)/.aws:/root/.aws:ro \
 		-e AWS_REGION=$(AWS_REGION) \
 		$(DOCKER_IMAGE) \
@@ -23,6 +24,7 @@ ubuntu:
 	@echo "Building Ubuntu AMI..."
 	docker run --rm -it \
 		-v $(PWD):/workspace \
+		-v $(HOME)/.config/packer:/root/.config/packer \
 		-v $(HOME)/.aws:/root/.aws:ro \
 		-e AWS_REGION=$(AWS_REGION) \
 		$(DOCKER_IMAGE) \

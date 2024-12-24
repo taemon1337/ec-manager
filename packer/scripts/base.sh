@@ -11,7 +11,6 @@ if [ -f /etc/debian_version ]; then
         wget \
         git \
         vim \
-        htop \
         unzip
 elif [ -f /etc/redhat-release ]; then
     # RHEL/CentOS
@@ -21,7 +20,6 @@ elif [ -f /etc/redhat-release ]; then
         wget \
         git \
         vim \
-        htop \
         unzip
 fi
 

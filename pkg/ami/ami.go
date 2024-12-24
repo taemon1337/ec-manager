@@ -25,6 +25,8 @@ type EC2Client interface {
 	CreateImage(ctx context.Context, params *ec2.CreateImageInput, optFns ...func(*ec2.Options)) (*ec2.CreateImageOutput, error)
 	DescribeSnapshots(ctx context.Context, params *ec2.DescribeSnapshotsInput, optFns ...func(*ec2.Options)) (*ec2.DescribeSnapshotsOutput, error)
 	DescribeVolumes(ctx context.Context, params *ec2.DescribeVolumesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeVolumesOutput, error)
+	DescribeSubnets(ctx context.Context, params *ec2.DescribeSubnetsInput, optFns ...func(*ec2.Options)) (*ec2.DescribeSubnetsOutput, error)
+	DescribeKeyPairs(ctx context.Context, params *ec2.DescribeKeyPairsInput, optFns ...func(*ec2.Options)) (*ec2.DescribeKeyPairsOutput, error)
 	NewInstanceRunningWaiter() *ec2.InstanceRunningWaiter
 	NewInstanceStoppedWaiter() *ec2.InstanceStoppedWaiter
 	NewInstanceTerminatedWaiter() *ec2.InstanceTerminatedWaiter
@@ -205,4 +207,22 @@ func (s *Service) DeleteInstance(ctx context.Context, instanceID string) (string
 // DescribeInstances returns a list of all EC2 instances
 func (s *Service) DescribeInstances(ctx context.Context) (*ec2.DescribeInstancesOutput, error) {
 	return s.client.DescribeInstances(ctx, &ec2.DescribeInstancesInput{})
+}
+
+// ListSubnets returns a list of all VPC subnets
+func (s *Service) ListSubnets(ctx context.Context) ([]types.Subnet, error) {
+	output, err := s.client.DescribeSubnets(ctx, &ec2.DescribeSubnetsInput{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to describe subnets: %w", err)
+	}
+	return output.Subnets, nil
+}
+
+// ListKeyPairs returns a list of all SSH key pairs
+func (s *Service) ListKeyPairs(ctx context.Context) ([]types.KeyPairInfo, error) {
+	output, err := s.client.DescribeKeyPairs(ctx, &ec2.DescribeKeyPairsInput{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to describe key pairs: %w", err)
+	}
+	return output.KeyPairs, nil
 }

@@ -123,6 +123,16 @@ func (c *EC2ClientWrapper) NewVolumeAvailableWaiter() *ec2.VolumeAvailableWaiter
 	return ec2.NewVolumeAvailableWaiter(c.Client)
 }
 
+// DescribeSubnets implements EC2Client
+func (c *EC2ClientWrapper) DescribeSubnets(ctx context.Context, params *ec2.DescribeSubnetsInput, optFns ...func(*ec2.Options)) (*ec2.DescribeSubnetsOutput, error) {
+	return c.Client.DescribeSubnets(ctx, params, optFns...)
+}
+
+// DescribeKeyPairs implements EC2Client
+func (c *EC2ClientWrapper) DescribeKeyPairs(ctx context.Context, params *ec2.DescribeKeyPairsInput, optFns ...func(*ec2.Options)) (*ec2.DescribeKeyPairsOutput, error) {
+	return c.Client.DescribeKeyPairs(ctx, params, optFns...)
+}
+
 // loadAWSConfig loads the AWS configuration
 func loadAWSConfig(cfg *Config) (aws.Config, error) {
 	var optFns []func(*config.LoadOptions) error

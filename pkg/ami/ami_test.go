@@ -25,6 +25,8 @@ type mockEC2Client struct {
 	CreateImageFunc        func(ctx context.Context, params *ec2.CreateImageInput, optFns ...func(*ec2.Options)) (*ec2.CreateImageOutput, error)
 	DescribeSnapshotsFunc  func(ctx context.Context, params *ec2.DescribeSnapshotsInput, optFns ...func(*ec2.Options)) (*ec2.DescribeSnapshotsOutput, error)
 	DescribeVolumesFunc    func(ctx context.Context, params *ec2.DescribeVolumesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeVolumesOutput, error)
+	DescribeSubnetsFunc    func(ctx context.Context, params *ec2.DescribeSubnetsInput, optFns ...func(*ec2.Options)) (*ec2.DescribeSubnetsOutput, error)
+	DescribeKeyPairsFunc   func(ctx context.Context, params *ec2.DescribeKeyPairsInput, optFns ...func(*ec2.Options)) (*ec2.DescribeKeyPairsOutput, error)
 }
 
 func (m *mockEC2Client) DescribeInstances(ctx context.Context, params *ec2.DescribeInstancesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
@@ -114,6 +116,20 @@ func (m *mockEC2Client) DescribeSnapshots(ctx context.Context, params *ec2.Descr
 func (m *mockEC2Client) DescribeVolumes(ctx context.Context, params *ec2.DescribeVolumesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeVolumesOutput, error) {
 	if m.DescribeVolumesFunc != nil {
 		return m.DescribeVolumesFunc(ctx, params, optFns...)
+	}
+	return nil, nil
+}
+
+func (m *mockEC2Client) DescribeSubnets(ctx context.Context, params *ec2.DescribeSubnetsInput, optFns ...func(*ec2.Options)) (*ec2.DescribeSubnetsOutput, error) {
+	if m.DescribeSubnetsFunc != nil {
+		return m.DescribeSubnetsFunc(ctx, params, optFns...)
+	}
+	return nil, nil
+}
+
+func (m *mockEC2Client) DescribeKeyPairs(ctx context.Context, params *ec2.DescribeKeyPairsInput, optFns ...func(*ec2.Options)) (*ec2.DescribeKeyPairsOutput, error) {
+	if m.DescribeKeyPairsFunc != nil {
+		return m.DescribeKeyPairsFunc(ctx, params, optFns...)
 	}
 	return nil, nil
 }
