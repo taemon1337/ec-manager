@@ -161,6 +161,14 @@ The credentials will be stored in ~/.aws/credentials under the specified profile
 
 		// For listing roles, we'll use the default credential chain
 		if listRoles {
+			// If in mock mode, return mock roles
+			if mockMode {
+				fmt.Fprintln(cmd.OutOrStdout(), "Available roles (mock):")
+				fmt.Fprintln(cmd.OutOrStdout(), "- arn:aws:iam::123456789012:role/mock-role-1")
+				fmt.Fprintln(cmd.OutOrStdout(), "- arn:aws:iam::123456789012:role/mock-role-2")
+				return nil
+			}
+
 			// Use LoadDefaultConfig which will try environment variables, shared credentials, etc.
 			cfg, err := loadConfig(ctx)
 			if err != nil {
@@ -185,6 +193,16 @@ The credentials will be stored in ~/.aws/credentials under the specified profile
 			fmt.Fprintln(cmd.OutOrStdout(), "Available roles:")
 			for _, role := range roles {
 				fmt.Fprintf(cmd.OutOrStdout(), "- %s\n", role)
+			}
+			return nil
+		}
+
+		// If in mock mode, return success
+		if mockMode {
+			if roleArn != "" {
+				fmt.Fprintf(cmd.OutOrStdout(), "Successfully assumed role %s (mock)\n", roleArn)
+			} else {
+				fmt.Fprintln(cmd.OutOrStdout(), "Successfully verified AWS credentials (mock)")
 			}
 			return nil
 		}
@@ -298,11 +316,10 @@ var (
 func init() {
 	checkCmd.AddCommand(checkCredentialsCmd)
 
-	// Add flags
-	checkCredentialsCmd.Flags().StringVar(&profile, "profile", "", "AWS profile to save credentials to (default: default)")
+	checkCredentialsCmd.Flags().StringVar(&profile, "profile", "", "AWS profile to save credentials to")
 	checkCredentialsCmd.Flags().StringVar(&roleArn, "role-arn", "", "ARN of the role to assume")
-	checkCredentialsCmd.Flags().StringVar(&mfaSerial, "mfa-serial", "", "Serial number of MFA device")
-	checkCredentialsCmd.Flags().StringVar(&mfaToken, "mfa-token", "", "Token from MFA device")
+	checkCredentialsCmd.Flags().StringVar(&mfaSerial, "mfa-serial", "", "Serial number of the MFA device")
+	checkCredentialsCmd.Flags().StringVar(&mfaToken, "mfa-token", "", "Token from the MFA device")
 	checkCredentialsCmd.Flags().Int32Var(&duration, "duration", 3600, "Duration in seconds for the assumed role session")
 	checkCredentialsCmd.Flags().StringVar(&sessionName, "session-name", "ec-manager", "Name for the assumed role session")
 	checkCredentialsCmd.Flags().BoolVar(&listRoles, "list-roles", false, "List available roles")
