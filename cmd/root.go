@@ -4,25 +4,33 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
+	"github.com/taemon1337/ec-manager/pkg/client"
 )
 
 // Common flags and variables
 var (
-	mockMode   bool
-	instanceID string
+	// Mock mode flag
+	mockMode bool
+
+	// AWS client
+	awsClient *client.Client
 )
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
-	Use:   "ecman <action>",
-	Short: "EC2 instance management tool",
-	Long: `ec-manager (ecman) is a CLI tool that helps you manage your AWS EC2 instances.
-It provides commands for:
-- Creating new instances with proper configuration
-- Listing and checking instance status
-- Migrating instances to new AMIs
-- Managing instance backups
-- Cleaning up unused instances`,
+	Use:   "ecman",
+	Short: "EC2 Manager CLI",
+	Long:  `A CLI tool for managing EC2 instances`,
+	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		var err error
+		cfg := client.NewDefaultConfig()
+		cfg.MockMode = mockMode
+		awsClient, err = client.NewClient(cfg)
+		if err != nil {
+			return fmt.Errorf("failed to create AWS client: %w", err)
+		}
+		return nil
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if len(args) == 0 {
 			return cmd.Help()
@@ -36,15 +44,11 @@ It provides commands for:
 	},
 }
 
-func init() {
-	rootCmd.PersistentFlags().BoolVar(&mockMode, "mock", false, "Enable mock mode")
-}
-
 // Execute adds all child commands to the root command and sets flags appropriately.
 func Execute() error {
-	if err := rootCmd.Execute(); err != nil {
-		fmt.Println(err)
-		return err
-	}
-	return nil
+	return rootCmd.Execute()
+}
+
+func init() {
+	rootCmd.PersistentFlags().BoolVar(&mockMode, "mock", false, "Enable mock mode")
 }

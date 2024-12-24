@@ -20,22 +20,22 @@ func NewRestoreCmd() *cobra.Command {
 		Short: "Restore an EC2 instance",
 		Long:  "Restore an EC2 instance from a snapshot",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			instanceID, err := cmd.Flags().GetString("instance-id")
+			instanceID, err := cmd.Flags().GetString("instance")
 			if err != nil {
-				return fmt.Errorf("failed to get instance-id flag: %w", err)
+				return fmt.Errorf("failed to get instance flag: %w", err)
 			}
 
-			snapshotID, err := cmd.Flags().GetString("snapshot-id")
+			snapshotID, err := cmd.Flags().GetString("snapshot")
 			if err != nil {
-				return fmt.Errorf("failed to get snapshot-id flag: %w", err)
+				return fmt.Errorf("failed to get snapshot flag: %w", err)
 			}
 
 			if instanceID == "" {
-				return fmt.Errorf("--instance-id is required")
+				return fmt.Errorf("--instance is required")
 			}
 
 			if snapshotID == "" {
-				return fmt.Errorf("--snapshot-id is required")
+				return fmt.Errorf("--snapshot is required")
 			}
 
 			ctx := cmd.Context()
@@ -65,8 +65,8 @@ func NewRestoreCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().String("instance-id", "", "Instance ID to restore")
-	cmd.Flags().String("snapshot-id", "", "Snapshot ID to restore from")
+	cmd.Flags().String("instance", "", "Instance to restore")
+	cmd.Flags().String("snapshot", "", "Snapshot to restore from")
 
 	return cmd
 }
@@ -81,7 +81,7 @@ func TestRestoreCmd(t *testing.T) {
 	}{
 		{
 			name: "successful_restore",
-			args: []string{"--instance-id", "i-123", "--snapshot-id", "snap-123"},
+			args: []string{"--instance", "i-123", "--snapshot", "snap-123"},
 			setup: func(client *mock.MockEC2Client) {
 				client.DescribeInstancesOutput = &ec2.DescribeInstancesOutput{
 					Reservations: []types.Reservation{
@@ -101,7 +101,7 @@ func TestRestoreCmd(t *testing.T) {
 		},
 		{
 			name:      "instance_not_found",
-			args:      []string{"--instance-id", "i-nonexistent", "--snapshot-id", "snap-123"},
+			args:      []string{"--instance", "i-nonexistent", "--snapshot", "snap-123"},
 			wantError: true,
 			errMsg:    "instance not found",
 			setup: func(client *mock.MockEC2Client) {
@@ -111,16 +111,16 @@ func TestRestoreCmd(t *testing.T) {
 			},
 		},
 		{
-			name:      "missing_instance_id",
-			args:      []string{"--snapshot-id", "snap-123"},
+			name:      "missing_instance",
+			args:      []string{"--snapshot", "snap-123"},
 			wantError: true,
-			errMsg:    "--instance-id is required",
+			errMsg:    "--instance is required",
 		},
 		{
-			name:      "missing_snapshot_id",
-			args:      []string{"--instance-id", "i-123"},
+			name:      "missing_snapshot",
+			args:      []string{"--instance", "i-123"},
 			wantError: true,
-			errMsg:    "--snapshot-id is required",
+			errMsg:    "--snapshot is required",
 		},
 	}
 

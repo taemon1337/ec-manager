@@ -138,3 +138,8 @@ func (c *EC2ClientWrapper) NewInstanceTerminatedWaiter() *ec2.InstanceTerminated
 func (c *EC2ClientWrapper) NewVolumeAvailableWaiter() *ec2.VolumeAvailableWaiter {
 	return ec2.NewVolumeAvailableWaiter(c.Client)
 }
+
+// AttachVolume implements EC2Client
+func (c *EC2ClientWrapper) AttachVolume(ctx context.Context, params *ec2.AttachVolumeInput, optFns ...func(*ec2.Options)) (*ec2.AttachVolumeOutput, error) {
+	return c.Client.AttachVolume(ctx, params, optFns...)
+}

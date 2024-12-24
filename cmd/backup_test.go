@@ -20,9 +20,9 @@ func NewBackupCmd() *cobra.Command {
 		Short: "Backup an EC2 instance",
 		Long:  "Create an AMI from an EC2 instance",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			instanceID, err := cmd.Flags().GetString("instance-id")
+			instanceID, err := cmd.Flags().GetString("instance")
 			if err != nil {
-				return fmt.Errorf("failed to get instance-id flag: %w", err)
+				return fmt.Errorf("failed to get instance flag: %w", err)
 			}
 
 			ctx := cmd.Context()
@@ -36,7 +36,7 @@ func NewBackupCmd() *cobra.Command {
 			}
 
 			if instanceID == "" && !enabled {
-				return fmt.Errorf("either --instance-id or --enabled flag must be set")
+				return fmt.Errorf("either --instance or --enabled flag must be set")
 			}
 
 			if instanceID != "" {
@@ -62,7 +62,7 @@ func NewBackupCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().String("instance-id", "", "Instance ID to backup")
+	cmd.Flags().String("instance", "", "Instance to backup")
 	cmd.Flags().Bool("enabled", false, "Backup all enabled instances")
 	return cmd
 }
@@ -77,7 +77,7 @@ func TestBackupCmd(t *testing.T) {
 	}{
 		{
 			name: "successful_backup",
-			args: []string{"--instance-id", "i-123"},
+			args: []string{"--instance", "i-123"},
 			setup: func(client *mock.MockEC2Client) {
 				client.DescribeInstancesOutput = &ec2.DescribeInstancesOutput{
 					Reservations: []types.Reservation{
@@ -108,7 +108,7 @@ func TestBackupCmd(t *testing.T) {
 		},
 		{
 			name:      "instance_not_found",
-			args:      []string{"--instance-id", "i-nonexistent"},
+			args:      []string{"--instance", "i-nonexistent"},
 			wantError: true,
 			errMsg:    "instance not found",
 			setup: func(client *mock.MockEC2Client) {
@@ -121,7 +121,7 @@ func TestBackupCmd(t *testing.T) {
 			name:      "no_instance_ID_and_enabled_flag_not_set",
 			args:      []string{},
 			wantError: true,
-			errMsg:    "either --instance-id or --enabled flag must be set",
+			errMsg:    "either --instance or --enabled flag must be set",
 		},
 	}
 

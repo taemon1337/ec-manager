@@ -5,48 +5,42 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
+	"github.com/taemon1337/ec-manager/pkg/ami"
 )
 
-var checkMigrateCmd = &cobra.Command{
+// CheckMigrateCmd represents the check-migrate command
+var CheckMigrateCmd = &cobra.Command{
 	Use:   "check-migrate",
-	Short: "Check if an instance can be migrated",
-	Long:  `Check if an EC2 instance can be migrated to a new AMI`,
-	RunE:  runCheckMigrate,
+	Short: "Check instances that need migration",
+	Long:  "Check and list EC2 instances that need to be migrated",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
+		amiService := ami.NewService(awsClient.GetEC2Client())
+		
+		output, err := amiService.DescribeInstances(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to list instances: %w", err)
+		}
+
+		fmt.Println("Instances that need migration:")
+		for _, reservation := range output.Reservations {
+			for _, instance := range reservation.Instances {
+				for _, tag := range instance.Tags {
+					if *tag.Key == "ami-migrate" && *tag.Value == "enabled" {
+						fmt.Printf("Instance ID: %s\n", *instance.InstanceId)
+						fmt.Printf("  State: %s\n", instance.State.Name)
+						fmt.Printf("  Instance Type: %s\n", instance.InstanceType)
+						fmt.Printf("  Launch Time: %s\n", instance.LaunchTime)
+						fmt.Println()
+					}
+				}
+			}
+		}
+
+		return nil
+	},
 }
 
 func init() {
-	rootCmd.AddCommand(checkMigrateCmd)
-
-	checkMigrateCmd.Flags().StringVarP(&instanceID, "instance", "i", "", "Instance ID to check")
-	checkMigrateCmd.MarkFlagRequired("instance")
-}
-
-func runCheckMigrate(cmd *cobra.Command, args []string) error {
-	ctx := context.Background()
-
-	// Initialize AWS clients
-	amiService, err := initAWSClients(ctx)
-	if err != nil {
-		return fmt.Errorf("init AWS clients: %w", err)
-	}
-
-	// Get instance status
-	instances, err := amiService.ListUserInstances(ctx, instanceID)
-	if err != nil {
-		return fmt.Errorf("get instance status: %w", err)
-	}
-
-	// Check if instance exists and can be migrated
-	if len(instances) == 0 {
-		return fmt.Errorf("instance %s not found", instanceID)
-	}
-
-	instance := instances[0]
-	if instance.State == "running" {
-		fmt.Printf("Instance %s can be migrated\n", instanceID)
-	} else {
-		fmt.Printf("Instance %s cannot be migrated (state: %s)\n", instanceID, instance.State)
-	}
-
-	return nil
+	rootCmd.AddCommand(CheckMigrateCmd)
 }

@@ -2,43 +2,28 @@ package cmd
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/spf13/cobra"
+	"github.com/taemon1337/ec-manager/pkg/ami"
 )
 
-var deleteCmd = &cobra.Command{
+// DeleteCmd represents the delete command
+var DeleteCmd = &cobra.Command{
 	Use:   "delete",
 	Short: "Delete an EC2 instance",
-	Long:  `Delete an EC2 instance and its associated resources`,
-	RunE:  runDelete,
+	Long:  "Delete an EC2 instance by its ID",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
+		amiService := ami.NewService(awsClient.GetEC2Client())
+		return amiService.DeleteInstance(ctx, deleteInstanceID)
+	},
 }
 
-var userID string
+var deleteInstanceID string
 
 func init() {
-	rootCmd.AddCommand(deleteCmd)
+	rootCmd.AddCommand(DeleteCmd)
 
-	deleteCmd.Flags().StringVarP(&instanceID, "instance", "i", "", "Instance ID to delete")
-	deleteCmd.Flags().StringVarP(&userID, "user", "u", "", "User ID owning the instance")
-	deleteCmd.MarkFlagRequired("instance")
-}
-
-func runDelete(cmd *cobra.Command, args []string) error {
-	ctx := context.Background()
-
-	// Initialize AWS clients
-	amiService, err := initAWSClients(ctx)
-	if err != nil {
-		return fmt.Errorf("init AWS clients: %w", err)
-	}
-
-	// Delete instance
-	err = amiService.DeleteInstance(ctx, userID, instanceID)
-	if err != nil {
-		return fmt.Errorf("delete instance: %w", err)
-	}
-
-	fmt.Printf("Successfully deleted instance %s\n", instanceID)
-	return nil
+	DeleteCmd.Flags().StringVarP(&deleteInstanceID, "instance", "i", "", "Instance ID to delete")
+	DeleteCmd.MarkFlagRequired("instance")
 }

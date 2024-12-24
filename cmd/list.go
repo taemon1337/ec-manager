@@ -5,38 +5,37 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
+	"github.com/taemon1337/ec-manager/pkg/ami"
 )
 
-var listCmd = &cobra.Command{
+// ListCmd represents the list command
+var ListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List EC2 instances",
-	Long:  `List all EC2 instances and their current state`,
-	RunE:  runList,
+	Long:  "List all EC2 instances in the account",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
+		amiService := ami.NewService(awsClient.GetEC2Client())
+		
+		output, err := amiService.DescribeInstances(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to list instances: %w", err)
+		}
+
+		for _, reservation := range output.Reservations {
+			for _, instance := range reservation.Instances {
+				fmt.Printf("Instance ID: %s\n", *instance.InstanceId)
+				fmt.Printf("  State: %s\n", instance.State.Name)
+				fmt.Printf("  Instance Type: %s\n", instance.InstanceType)
+				fmt.Printf("  Launch Time: %s\n", instance.LaunchTime)
+				fmt.Println()
+			}
+		}
+
+		return nil
+	},
 }
 
 func init() {
-	rootCmd.AddCommand(listCmd)
-}
-
-func runList(cmd *cobra.Command, args []string) error {
-	ctx := context.Background()
-
-	// Initialize AWS clients
-	amiService, err := initAWSClients(ctx)
-	if err != nil {
-		return fmt.Errorf("init AWS clients: %w", err)
-	}
-
-	// List instances
-	instances, err := amiService.ListUserInstances(ctx, "")
-	if err != nil {
-		return fmt.Errorf("list instances: %w", err)
-	}
-
-	// Print instances
-	for _, instance := range instances {
-		fmt.Printf("Instance %s status: %s\n", instance.InstanceID, instance.State)
-	}
-
-	return nil
+	rootCmd.AddCommand(ListCmd)
 }

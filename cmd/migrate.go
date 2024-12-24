@@ -2,48 +2,34 @@ package cmd
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/spf13/cobra"
+	"github.com/taemon1337/ec-manager/pkg/ami"
 )
 
-// migrateCmd represents the migrate command
-var migrateCmd = &cobra.Command{
+// MigrateCmd represents the migrate command
+var MigrateCmd = &cobra.Command{
 	Use:   "migrate",
-	Short: "Migrate an EC2 instance to a new AMI",
-	Long:  `Migrate an EC2 instance to a new AMI by creating a new instance with the same configuration`,
-	RunE:  runMigrate,
+	Short: "Migrate an instance",
+	Long:  "Migrate an instance by creating an AMI and launching a new instance from it",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
+		amiService := ami.NewService(awsClient.GetEC2Client())
+
+		return amiService.MigrateInstance(ctx, migrateInstanceID, newAMI)
+	},
 }
 
 var (
-	newAMI string
+	migrateInstanceID string
+	newAMI           string
 )
 
 func init() {
-	rootCmd.AddCommand(migrateCmd)
+	rootCmd.AddCommand(MigrateCmd)
 
-	migrateCmd.Flags().StringVarP(&instanceID, "instance", "i", "", "Instance ID to migrate")
-	migrateCmd.Flags().StringVarP(&newAMI, "ami", "a", "", "New AMI ID to migrate to")
-
-	migrateCmd.MarkFlagRequired("instance")
-	migrateCmd.MarkFlagRequired("ami")
-}
-
-func runMigrate(cmd *cobra.Command, args []string) error {
-	ctx := context.Background()
-
-	// Initialize AWS clients
-	amiService, err := initAWSClients(ctx)
-	if err != nil {
-		return fmt.Errorf("init AWS clients: %w", err)
-	}
-
-	// Migrate instance
-	err = amiService.MigrateInstance(ctx, instanceID, newAMI)
-	if err != nil {
-		return fmt.Errorf("migrate instance: %w", err)
-	}
-
-	fmt.Printf("Successfully migrated instance %s to AMI %s\n", instanceID, newAMI)
-	return nil
+	MigrateCmd.Flags().StringVarP(&migrateInstanceID, "instance", "i", "", "Instance ID to migrate")
+	MigrateCmd.Flags().StringVar(&newAMI, "new-ami", "", "New AMI ID to migrate to")
+	MigrateCmd.MarkFlagRequired("instance")
+	MigrateCmd.MarkFlagRequired("new-ami")
 }

@@ -2,50 +2,34 @@ package cmd
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/spf13/cobra"
+	"github.com/taemon1337/ec-manager/pkg/ami"
 )
+
+// RestoreCmd represents the restore command
+var RestoreCmd = &cobra.Command{
+	Use:   "restore",
+	Short: "Restore an instance from a snapshot",
+	Long:  "Restore an instance by creating and attaching a volume from a snapshot",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
+		amiService := ami.NewService(awsClient.GetEC2Client())
+		return amiService.RestoreInstance(ctx, restoreInstanceID, snapshotID)
+	},
+}
 
 var (
-	snapshotID string
+	restoreInstanceID string
+	snapshotID        string
 )
 
-var restoreCmd = &cobra.Command{
-	Use:   "restore",
-	Short: "Restore an EC2 instance from a backup",
-	Long: `Restore an EC2 instance from a backup snapshot.
-		
-		Example:
-		  ecman restore --snapshot snap-1234567890abcdef0 --instance i-1234567890abcdef0`,
-	RunE: runRestore,
-}
-
 func init() {
-	rootCmd.AddCommand(restoreCmd)
+	rootCmd.AddCommand(RestoreCmd)
 
-	restoreCmd.Flags().StringVarP(&instanceID, "instance", "i", "", "Instance ID to restore")
-	restoreCmd.Flags().StringVarP(&snapshotID, "snapshot", "s", "", "Snapshot ID to restore from")
+	RestoreCmd.Flags().StringVarP(&restoreInstanceID, "instance", "i", "", "Instance ID to restore")
+	RestoreCmd.Flags().StringVarP(&snapshotID, "snapshot", "s", "", "Snapshot ID to restore from")
 
-	restoreCmd.MarkFlagRequired("instance")
-	restoreCmd.MarkFlagRequired("snapshot")
-}
-
-func runRestore(cmd *cobra.Command, args []string) error {
-	ctx := context.Background()
-
-	// Initialize AWS clients
-	amiService, err := initAWSClients(ctx)
-	if err != nil {
-		return fmt.Errorf("init AWS clients: %w", err)
-	}
-
-	// Restore instance
-	fmt.Printf("Starting restore of snapshot %s to instance %s\n", snapshotID, instanceID)
-	if err := amiService.RestoreInstance(ctx, instanceID, snapshotID); err != nil {
-		return fmt.Errorf("failed to restore instance: %w", err)
-	}
-
-	fmt.Fprintf(cmd.OutOrStdout(), "Instance %s restored from snapshot %s\n", instanceID, snapshotID)
-	return nil
+	RestoreCmd.MarkFlagRequired("instance")
+	RestoreCmd.MarkFlagRequired("snapshot")
 }

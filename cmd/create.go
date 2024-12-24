@@ -2,59 +2,50 @@ package cmd
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/spf13/cobra"
 	"github.com/taemon1337/ec-manager/pkg/ami"
 )
 
-var createCmd = &cobra.Command{
+// CreateCmd represents the create command
+var CreateCmd = &cobra.Command{
 	Use:   "create",
 	Short: "Create a new EC2 instance",
-	Long:  `Create a new EC2 instance from an AMI`,
-	RunE:  runCreate,
+	Long:  "Create a new EC2 instance with specified configuration",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
+		amiService := ami.NewService(awsClient.GetEC2Client())
+
+		cfg := ami.InstanceConfig{
+			ImageID:      imageID,
+			InstanceType: instanceType,
+			KeyName:      keyName,
+			SubnetID:     subnetID,
+			UserData:     userData,
+		}
+
+		return amiService.CreateInstance(ctx, cfg)
+	},
 }
 
 var (
-	amiID          string
-	instanceType   string
-	subnetID       string
-	securityGroups []string
+	imageID      string
+	instanceType string
+	keyName      string
+	subnetID     string
+	userData     string
 )
 
 func init() {
-	rootCmd.AddCommand(createCmd)
+	rootCmd.AddCommand(CreateCmd)
 
-	createCmd.Flags().StringVarP(&amiID, "ami", "a", "", "AMI ID to use")
-	createCmd.Flags().StringVarP(&instanceType, "type", "t", "t2.micro", "Instance type")
-	createCmd.Flags().StringVarP(&subnetID, "subnet", "s", "", "Subnet ID")
-	createCmd.Flags().StringSliceVarP(&securityGroups, "security-groups", "g", nil, "Security group IDs")
+	CreateCmd.Flags().StringVarP(&imageID, "image", "i", "", "AMI ID to use")
+	CreateCmd.Flags().StringVarP(&instanceType, "type", "t", "t2.micro", "Instance type")
+	CreateCmd.Flags().StringVarP(&keyName, "key", "k", "", "Key pair name")
+	CreateCmd.Flags().StringVarP(&subnetID, "subnet", "s", "", "Subnet ID")
+	CreateCmd.Flags().StringVarP(&userData, "userdata", "u", "", "User data script")
 
-	createCmd.MarkFlagRequired("ami")
-}
-
-func runCreate(cmd *cobra.Command, args []string) error {
-	ctx := context.Background()
-
-	// Initialize AWS clients
-	amiService, err := initAWSClients(ctx)
-	if err != nil {
-		return fmt.Errorf("init AWS clients: %w", err)
-	}
-
-	// Create instance config
-	instanceConfig := ami.InstanceConfig{
-		Name:   fmt.Sprintf("instance-%s", amiID),
-		OSType: "linux", // We could detect this from the AMI
-		Size:   instanceType,
-	}
-
-	// Create instance
-	instance, err := amiService.CreateInstance(ctx, instanceConfig)
-	if err != nil {
-		return fmt.Errorf("create instance: %w", err)
-	}
-
-	fmt.Printf("Created instance %s\n", instance.InstanceID)
-	return nil
+	CreateCmd.MarkFlagRequired("image")
+	CreateCmd.MarkFlagRequired("key")
+	CreateCmd.MarkFlagRequired("subnet")
 }

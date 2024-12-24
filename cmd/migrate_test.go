@@ -20,9 +20,9 @@ func NewMigrateCmd() *cobra.Command {
 		Short: "Migrate an EC2 instance",
 		Long:  "Migrate an EC2 instance to a new AMI",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			instanceID, err := cmd.Flags().GetString("instance-id")
+			instanceID, err := cmd.Flags().GetString("instance")
 			if err != nil {
-				return fmt.Errorf("failed to get instance-id flag: %w", err)
+				return fmt.Errorf("failed to get instance flag: %w", err)
 			}
 
 			newAMI, err := cmd.Flags().GetString("new-ami")
@@ -40,7 +40,7 @@ func NewMigrateCmd() *cobra.Command {
 			}
 
 			if instanceID == "" && !enabled {
-				return fmt.Errorf("either --instance-id or --enabled flag must be set")
+				return fmt.Errorf("either --instance or --enabled flag must be set")
 			}
 
 			ctx := cmd.Context()
@@ -71,7 +71,7 @@ func NewMigrateCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().String("instance-id", "", "Instance ID to migrate")
+	cmd.Flags().String("instance", "", "Instance to migrate")
 	cmd.Flags().String("new-ami", "", "New AMI ID to migrate to")
 	cmd.Flags().Bool("enabled", false, "Migrate all enabled instances")
 
@@ -88,7 +88,7 @@ func TestMigrateCmd(t *testing.T) {
 	}{
 		{
 			name: "successful_migration",
-			args: []string{"--instance-id", "i-123", "--new-ami", "ami-123"},
+			args: []string{"--instance", "i-123", "--new-ami", "ami-123"},
 			setup: func(client *mock.MockEC2Client) {
 				client.DescribeInstancesOutput = &ec2.DescribeInstancesOutput{
 					Reservations: []types.Reservation{
@@ -108,7 +108,7 @@ func TestMigrateCmd(t *testing.T) {
 		},
 		{
 			name:      "instance_not_found",
-			args:      []string{"--instance-id", "i-nonexistent", "--new-ami", "ami-123"},
+			args:      []string{"--instance", "i-nonexistent", "--new-ami", "ami-123"},
 			wantError: true,
 			errMsg:    "instance not found",
 			setup: func(client *mock.MockEC2Client) {
@@ -119,7 +119,7 @@ func TestMigrateCmd(t *testing.T) {
 		},
 		{
 			name:      "missing_new_ami",
-			args:      []string{"--instance-id", "i-123"},
+			args:      []string{"--instance", "i-123"},
 			wantError: true,
 			errMsg:    "--new-ami flag must be specified",
 		},
@@ -127,7 +127,7 @@ func TestMigrateCmd(t *testing.T) {
 			name:      "no_instance_ID_and_enabled_flag_not_set",
 			args:      []string{"--new-ami", "ami-123"},
 			wantError: true,
-			errMsg:    "either --instance-id or --enabled flag must be set",
+			errMsg:    "either --instance or --enabled flag must be set",
 		},
 	}
 
