@@ -11,35 +11,21 @@ import (
 // Common variables
 var awsClient *client.Client
 
-func init() {
-	cfg := client.NewDefaultConfig()
-	cfg.MockMode = mockMode
-
-	// Only initialize AWS client if not in test mode
-	if !mockMode {
-		var err error
-		awsClient, err = client.NewClient(cfg)
-		if err != nil {
-			fmt.Printf("Warning: Failed to initialize AWS client: %v\n", err)
-		}
-	}
-}
-
 // initAWSClients initializes AWS clients and returns an AMI service
 func initAWSClients(ctx context.Context) (*ami.Service, error) {
-	if mockMode {
-		// Create a new mock client for testing
+	// Initialize client if not already done
+	if awsClient == nil {
 		cfg := client.NewDefaultConfig()
-		cfg.MockMode = true
+		cfg.MockMode = mockMode
+
 		var err error
 		awsClient, err = client.NewClient(cfg)
 		if err != nil {
-			return nil, fmt.Errorf("failed to create mock client: %w", err)
+			if !mockMode {
+				return nil, fmt.Errorf("failed to initialize AWS client: %w", err)
+			}
+			// In mock mode, we can proceed with a mock client even if AWS credentials are missing
 		}
-	}
-
-	if awsClient == nil {
-		return nil, fmt.Errorf("AWS client not initialized")
 	}
 
 	// Create AMI service

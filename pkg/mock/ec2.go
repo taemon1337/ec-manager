@@ -120,9 +120,12 @@ func (m *MockEC2Client) DescribeInstances(ctx context.Context, params *ec2.Descr
 	if m.DescribeInstancesFunc != nil {
 		return m.DescribeInstancesFunc(ctx, params, optFns...)
 	}
-	if len(params.InstanceIds) > 0 && params.InstanceIds[0] == "i-nonexistent" {
-		return nil, fmt.Errorf("instance not found: i-nonexistent")
+
+	// Mock instance not found for specific ID
+	if len(params.InstanceIds) > 0 && params.InstanceIds[0] != "i-123" {
+		return nil, fmt.Errorf("instance not found: %s", params.InstanceIds[0])
 	}
+
 	return m.DescribeInstancesOutput, nil
 }
 
@@ -187,6 +190,7 @@ func (m *MockEC2Client) AttachVolume(ctx context.Context, params *ec2.AttachVolu
 	if m.AttachVolumeFunc != nil {
 		return m.AttachVolumeFunc(ctx, params, optFns...)
 	}
+	fmt.Printf("Mock: Attaching volume %s to instance %s at device %s\n", *params.VolumeId, *params.InstanceId, *params.Device)
 	return m.AttachVolumeOutput, nil
 }
 
@@ -203,6 +207,7 @@ func (m *MockEC2Client) CreateVolume(ctx context.Context, params *ec2.CreateVolu
 	if m.CreateVolumeFunc != nil {
 		return m.CreateVolumeFunc(ctx, params, optFns...)
 	}
+	fmt.Printf("Mock: Creating volume from snapshot %s in AZ %s\n", *params.SnapshotId, *params.AvailabilityZone)
 	return m.CreateVolumeOutput, nil
 }
 
@@ -211,6 +216,12 @@ func (m *MockEC2Client) DescribeSnapshots(ctx context.Context, params *ec2.Descr
 	if m.DescribeSnapshotsFunc != nil {
 		return m.DescribeSnapshotsFunc(ctx, params, optFns...)
 	}
+
+	// Mock snapshot not found for specific ID
+	if len(params.SnapshotIds) > 0 && params.SnapshotIds[0] != "snap-123" {
+		return nil, fmt.Errorf("snapshot not found: %s", params.SnapshotIds[0])
+	}
+
 	return m.DescribeSnapshotsOutput, nil
 }
 
@@ -222,9 +233,9 @@ func (m *MockEC2Client) DescribeVolumes(ctx context.Context, params *ec2.Describ
 	return m.DescribeVolumesOutput, nil
 }
 
-// NewInstanceRunningWaiter returns a mock running waiter
-func (m *MockEC2Client) NewInstanceRunningWaiter() *ec2.InstanceRunningWaiter {
-	return &ec2.InstanceRunningWaiter{}
+// NewVolumeAvailableWaiter returns a mock volume available waiter
+func (m *MockEC2Client) NewVolumeAvailableWaiter() *ec2.VolumeAvailableWaiter {
+	return &ec2.VolumeAvailableWaiter{}
 }
 
 // NewInstanceStoppedWaiter returns a mock stopped waiter
@@ -232,12 +243,12 @@ func (m *MockEC2Client) NewInstanceStoppedWaiter() *ec2.InstanceStoppedWaiter {
 	return &ec2.InstanceStoppedWaiter{}
 }
 
+// NewInstanceRunningWaiter returns a mock running waiter
+func (m *MockEC2Client) NewInstanceRunningWaiter() *ec2.InstanceRunningWaiter {
+	return &ec2.InstanceRunningWaiter{}
+}
+
 // NewInstanceTerminatedWaiter returns a mock terminated waiter
 func (m *MockEC2Client) NewInstanceTerminatedWaiter() *ec2.InstanceTerminatedWaiter {
 	return &ec2.InstanceTerminatedWaiter{}
-}
-
-// NewVolumeAvailableWaiter returns a mock volume available waiter
-func (m *MockEC2Client) NewVolumeAvailableWaiter() *ec2.VolumeAvailableWaiter {
-	return &ec2.VolumeAvailableWaiter{}
 }

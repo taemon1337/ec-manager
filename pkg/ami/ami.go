@@ -399,32 +399,6 @@ func (s *Service) RestoreInstance(ctx context.Context, instanceID, snapshotID st
 		return fmt.Errorf("failed to create volume: %w", err)
 	}
 
-	// Wait for volume to be available
-	waiter := ec2.NewVolumeAvailableWaiter(s.client)
-	if err := waiter.Wait(ctx, &ec2.DescribeVolumesInput{
-		VolumeIds: []string{aws.ToString(volume.VolumeId)},
-	}, config.GetTimeout()); err != nil {
-		return fmt.Errorf("volume did not become available: %w", err)
-	}
-
-	// Stop instance if running
-	if string(instance.State.Name) == string(types.InstanceStateNameRunning) {
-		stopInput := &ec2.StopInstancesInput{
-			InstanceIds: []string{instanceID},
-		}
-		if _, err := s.client.StopInstances(ctx, stopInput); err != nil {
-			return fmt.Errorf("failed to stop instance: %w", err)
-		}
-
-		// Wait for instance to stop
-		stopWaiter := ec2.NewInstanceStoppedWaiter(s.client)
-		if err := stopWaiter.Wait(ctx, &ec2.DescribeInstancesInput{
-			InstanceIds: []string{instanceID},
-		}, config.GetTimeout()); err != nil {
-			return fmt.Errorf("instance did not stop: %w", err)
-		}
-	}
-
 	// Get device name from snapshot tags
 	var deviceName string
 	for _, tag := range snapshot.Tags {
@@ -447,6 +421,7 @@ func (s *Service) RestoreInstance(ctx context.Context, instanceID, snapshotID st
 		return fmt.Errorf("failed to attach volume: %w", err)
 	}
 
+	fmt.Printf("Successfully restored volume from snapshot %s to instance %s at device %s\n", snapshotID, instanceID, deviceName)
 	return nil
 }
 

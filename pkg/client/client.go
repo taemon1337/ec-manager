@@ -54,38 +54,41 @@ func NewClient(cfg *Config) (*Client, error) {
 	}
 
 	var ec2Client ecTypes.EC2Client
-	var err error
 
 	if cfg.MockMode {
+		// In mock mode, always create a mock client
 		ec2Client = mock.NewMockEC2Client()
-	} else {
-		awsCfg, err := loadAWSConfig(cfg)
-		if err != nil {
-			return nil, fmt.Errorf("failed to load AWS config: %w", err)
-		}
+		return &Client{
+			EC2Client: ec2Client,
+		}, nil
+	}
 
-		ec2Client = &EC2ClientWrapper{
-			Client: ec2.NewFromConfig(awsCfg),
-		}
+	// Only try to load AWS config if not in mock mode
+	awsCfg, err := loadAWSConfig(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load AWS config: %w", err)
+	}
+
+	ec2Client = &EC2ClientWrapper{
+		Client: ec2.NewFromConfig(awsCfg),
 	}
 
 	return &Client{
 		EC2Client: ec2Client,
-	}, err
+	}, nil
 }
 
 // loadAWSConfig loads the AWS configuration
 func loadAWSConfig(cfg *Config) (aws.Config, error) {
 	optFns := []func(*config.LoadOptions) error{
 		config.WithRegion(cfg.Region),
-		config.WithRetryMaxAttempts(cfg.RetryCount),
 	}
 
 	if cfg.Profile != "" {
 		optFns = append(optFns, config.WithSharedConfigProfile(cfg.Profile))
 	}
 
-	return config.LoadDefaultConfig(context.Background(), optFns...)
+	return config.LoadDefaultConfig(context.TODO(), optFns...)
 }
 
 // GetEC2Client returns the EC2 client
@@ -96,7 +99,7 @@ func (c *Client) GetEC2Client() ecTypes.EC2Client {
 // GetInstanceConfig returns the instance configuration
 func (c *Config) GetInstanceConfig() *InstanceConfig {
 	if c.InstanceConfig == nil {
-		c.InstanceConfig = &InstanceConfig{
+		return &InstanceConfig{
 			InstanceType: "t2.micro",
 		}
 	}
@@ -106,7 +109,7 @@ func (c *Config) GetInstanceConfig() *InstanceConfig {
 // GetTimeout returns the timeout duration
 func (c *Config) GetTimeout() time.Duration {
 	if c.Timeout == 0 {
-		c.Timeout = 5 * time.Minute
+		return 5 * time.Minute
 	}
 	return c.Timeout
 }
