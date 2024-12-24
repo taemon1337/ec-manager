@@ -30,6 +30,10 @@ func init() {
 	RestoreCmd.Flags().StringVarP(&restoreInstanceID, "instance", "i", "", "Instance ID to restore")
 	RestoreCmd.Flags().StringVarP(&snapshotID, "snapshot", "s", "", "Snapshot ID to restore from")
 
-	RestoreCmd.MarkFlagRequired("instance")
-	RestoreCmd.MarkFlagRequired("snapshot")
+	if err := RestoreCmd.MarkFlagRequired("instance"); err != nil {
+		panic(err)
+	}
+	if err := RestoreCmd.MarkFlagRequired("snapshot"); err != nil {
+		panic(err)
+	}
 }

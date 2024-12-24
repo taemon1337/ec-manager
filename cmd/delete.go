@@ -33,5 +33,7 @@ func init() {
 	rootCmd.AddCommand(DeleteCmd)
 
 	DeleteCmd.Flags().StringVarP(&deleteInstanceID, "instance", "i", "", "Instance ID to delete")
-	DeleteCmd.MarkFlagRequired("instance")
+	if err := DeleteCmd.MarkFlagRequired("instance"); err != nil {
+		panic(err)
+	}
 }

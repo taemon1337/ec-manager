@@ -45,7 +45,7 @@ help:
 	@echo "  make clean      - Clean build artifacts"
 	@echo "  make test       - Run tests in Docker"
 	@echo "  make lint       - Run linter in Docker"
-	@echo "  make fmt        - Format code using goimports"
+	@echo "  make fmt        - Format code using golangci-lint"
 	@echo "  make docker-build - Build Docker image"
 	@echo "  make docker-test  - Run tests in Docker"
 	@echo "  make docker-tidy - Run go mod tidy in Docker"
@@ -86,13 +86,12 @@ lint:
 		golangci/golangci-lint:latest \
 		golangci-lint run ./...
 
-# Format code using goimports
+# Format code using golangci-lint
 fmt:
 	@echo "Formatting code..."
 	docker run $(DOCKER_RUN_OPTS) \
-		golang:$(GO_VERSION)-alpine \
-		/bin/sh -c "go install golang.org/x/tools/cmd/goimports@v0.16.1 && \
-		find . -type f -name '*.go' ! -path './vendor/*' -exec goimports -w {} \;"
+		golangci/golangci-lint:latest \
+		golangci-lint run --fix
 
 # Build Docker image
 docker-build:

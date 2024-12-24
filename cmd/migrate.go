@@ -37,6 +37,10 @@ func init() {
 
 	MigrateCmd.Flags().StringVarP(&migrateInstanceID, "instance", "i", "", "Instance ID to migrate")
 	MigrateCmd.Flags().StringVar(&newAMI, "new-ami", "", "New AMI ID to migrate to")
-	MigrateCmd.MarkFlagRequired("instance")
-	MigrateCmd.MarkFlagRequired("new-ami")
+	if err := MigrateCmd.MarkFlagRequired("instance"); err != nil {
+		panic(err)
+	}
+	if err := MigrateCmd.MarkFlagRequired("new-ami"); err != nil {
+		panic(err)
+	}
 }

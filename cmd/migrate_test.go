@@ -49,7 +49,7 @@ func NewMigrateCmd() *cobra.Command {
 			}
 
 			if instanceID != "" {
-				ec2Client := testutil.GetEC2Client(cmd)
+				ec2Client := testutil.GetEC2Client(ctx)
 				if ec2Client == nil {
 					return fmt.Errorf("failed to get EC2 client")
 				}
@@ -82,49 +82,66 @@ func TestMigrateCmd(t *testing.T) {
 	tests := []struct {
 		name      string
 		args      []string
+		setup     func(*mock.MockEC2Client)
 		wantError bool
 		errMsg    string
-		setup     func(client *mock.MockEC2Client)
 	}{
 		{
-			name: "successful_migration",
+			name: "successful migration",
 			args: []string{"--instance", "i-123", "--new-ami", "ami-123"},
-			setup: func(client *mock.MockEC2Client) {
-				client.DescribeInstancesOutput = &ec2.DescribeInstancesOutput{
-					Reservations: []types.Reservation{
-						{
-							Instances: []types.Instance{
-								{
-									InstanceId: aws.String("i-123"),
-									State: &types.InstanceState{
-										Name: types.InstanceStateNameRunning,
+			setup: func(mockClient *mock.MockEC2Client) {
+				mockClient.DescribeInstancesFunc = func(ctx context.Context, params *ec2.DescribeInstancesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
+					return &ec2.DescribeInstancesOutput{
+						Reservations: []types.Reservation{
+							{
+								Instances: []types.Instance{
+									{
+										InstanceId:   aws.String("i-123"),
+										InstanceType: types.InstanceTypeT2Micro,
+										KeyName:      aws.String("test-key"),
+										SubnetId:     aws.String("subnet-123"),
+										State: &types.InstanceState{
+											Name: types.InstanceStateNameRunning,
+										},
 									},
 								},
 							},
 						},
-					},
+					}, nil
+				}
+
+				mockClient.RunInstancesFunc = func(ctx context.Context, params *ec2.RunInstancesInput, optFns ...func(*ec2.Options)) (*ec2.RunInstancesOutput, error) {
+					return &ec2.RunInstancesOutput{
+						Instances: []types.Instance{
+							{
+								InstanceId: aws.String("i-456"),
+							},
+						},
+					}, nil
 				}
 			},
+			wantError: false,
 		},
 		{
-			name:      "instance_not_found",
-			args:      []string{"--instance", "i-nonexistent", "--new-ami", "ami-123"},
+			name: "instance not found",
+			args: []string{"--instance", "i-nonexistent", "--new-ami", "ami-123"},
+			setup: func(mockClient *mock.MockEC2Client) {
+				mockClient.DescribeInstancesFunc = func(ctx context.Context, params *ec2.DescribeInstancesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
+					instanceID := "i-nonexistent"
+					return nil, fmt.Errorf("instance not found: %s", instanceID)
+				}
+			},
 			wantError: true,
-			errMsg:    "instance not found",
-			setup: func(client *mock.MockEC2Client) {
-				client.DescribeInstancesOutput = &ec2.DescribeInstancesOutput{
-					Reservations: []types.Reservation{},
-				}
-			},
+			errMsg:    "failed to describe instance: instance not found: i-nonexistent",
 		},
 		{
-			name:      "missing_new_ami",
+			name:      "missing new ami",
 			args:      []string{"--instance", "i-123"},
 			wantError: true,
 			errMsg:    "--new-ami flag must be specified",
 		},
 		{
-			name:      "no_instance_ID_and_enabled_flag_not_set",
+			name:      "no instance ID and enabled flag not set",
 			args:      []string{"--new-ami", "ami-123"},
 			wantError: true,
 			errMsg:    "either --instance or --enabled flag must be set",
@@ -138,18 +155,18 @@ func TestMigrateCmd(t *testing.T) {
 			if tt.setup != nil {
 				mockClient := mock.NewMockEC2Client()
 				tt.setup(mockClient)
-				cmd.SetContext(context.WithValue(context.Background(), "ec2_client", mockClient))
+				cmd.SetContext(testutil.GetTestContextWithClient(mockClient))
 			}
 
 			err := testutil.SetupTestCommand(cmd, tt.args)
+
 			if tt.wantError {
-				if err == nil {
-					t.Errorf("expected error containing %q, got nil", tt.errMsg)
-				} else if tt.errMsg != "" {
+				assert.Error(t, err)
+				if tt.errMsg != "" {
 					assert.Contains(t, err.Error(), tt.errMsg)
 				}
-			} else if err != nil {
-				t.Errorf("unexpected error: %v", err)
+			} else {
+				assert.NoError(t, err)
 			}
 		})
 	}

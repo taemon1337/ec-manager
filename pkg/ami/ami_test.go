@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"testing"
-	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
@@ -133,18 +132,6 @@ func (m *mockEC2Client) NewInstanceTerminatedWaiter() *ec2.InstanceTerminatedWai
 
 func (m *mockEC2Client) NewVolumeAvailableWaiter() *ec2.VolumeAvailableWaiter {
 	return nil
-}
-
-type mockWaiter struct{}
-
-func (w *mockWaiter) Wait(ctx context.Context, params *ec2.DescribeInstancesInput, maxWaitDur time.Duration) error {
-	return nil
-}
-
-func setupTest(t *testing.T) (*Service, *mockEC2Client) {
-	mockClient := &mockEC2Client{}
-	svc := NewService(mockClient)
-	return svc, mockClient
 }
 
 func TestBackupInstance(t *testing.T) {

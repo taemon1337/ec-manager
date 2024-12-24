@@ -43,7 +43,7 @@ func NewRestoreCmd() *cobra.Command {
 				ctx = context.Background()
 			}
 
-			ec2Client := testutil.GetEC2Client(cmd)
+			ec2Client := testutil.GetEC2Client(cmd.Context())
 			if ec2Client == nil {
 				return fmt.Errorf("failed to get EC2 client")
 			}
@@ -75,49 +75,63 @@ func TestRestoreCmd(t *testing.T) {
 	tests := []struct {
 		name      string
 		args      []string
+		setup     func(*mock.MockEC2Client)
 		wantError bool
 		errMsg    string
-		setup     func(client *mock.MockEC2Client)
 	}{
 		{
-			name: "successful_restore",
+			name: "successful restore",
 			args: []string{"--instance", "i-123", "--snapshot", "snap-123"},
-			setup: func(client *mock.MockEC2Client) {
-				client.DescribeInstancesOutput = &ec2.DescribeInstancesOutput{
-					Reservations: []types.Reservation{
-						{
-							Instances: []types.Instance{
-								{
-									InstanceId: aws.String("i-123"),
-									State: &types.InstanceState{
-										Name: types.InstanceStateNameRunning,
+			setup: func(mockClient *mock.MockEC2Client) {
+				mockClient.DescribeInstancesFunc = func(ctx context.Context, params *ec2.DescribeInstancesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
+					return &ec2.DescribeInstancesOutput{
+						Reservations: []types.Reservation{
+							{
+								Instances: []types.Instance{
+									{
+										InstanceId: aws.String("i-123"),
+										State: &types.InstanceState{
+											Name: types.InstanceStateNameRunning,
+										},
 									},
 								},
 							},
 						},
-					},
+					}, nil
+				}
+
+				mockClient.CreateVolumeFunc = func(ctx context.Context, params *ec2.CreateVolumeInput, optFns ...func(*ec2.Options)) (*ec2.CreateVolumeOutput, error) {
+					return &ec2.CreateVolumeOutput{
+						VolumeId: aws.String("vol-123"),
+					}, nil
+				}
+
+				mockClient.AttachVolumeFunc = func(ctx context.Context, params *ec2.AttachVolumeInput, optFns ...func(*ec2.Options)) (*ec2.AttachVolumeOutput, error) {
+					return &ec2.AttachVolumeOutput{}, nil
 				}
 			},
+			wantError: false,
 		},
 		{
-			name:      "instance_not_found",
-			args:      []string{"--instance", "i-nonexistent", "--snapshot", "snap-123"},
+			name: "instance not found",
+			args: []string{"--instance", "i-nonexistent", "--snapshot", "snap-123"},
+			setup: func(mockClient *mock.MockEC2Client) {
+				mockClient.DescribeInstancesFunc = func(ctx context.Context, params *ec2.DescribeInstancesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
+					instanceID := "i-nonexistent"
+					return nil, fmt.Errorf("instance not found: %s", instanceID)
+				}
+			},
 			wantError: true,
-			errMsg:    "instance not found",
-			setup: func(client *mock.MockEC2Client) {
-				client.DescribeInstancesOutput = &ec2.DescribeInstancesOutput{
-					Reservations: []types.Reservation{},
-				}
-			},
+			errMsg:    "failed to describe instance: instance not found: i-nonexistent",
 		},
 		{
-			name:      "missing_instance",
+			name:      "missing instance",
 			args:      []string{"--snapshot", "snap-123"},
 			wantError: true,
 			errMsg:    "--instance is required",
 		},
 		{
-			name:      "missing_snapshot",
+			name:      "missing snapshot",
 			args:      []string{"--instance", "i-123"},
 			wantError: true,
 			errMsg:    "--snapshot is required",
@@ -131,18 +145,18 @@ func TestRestoreCmd(t *testing.T) {
 			if tt.setup != nil {
 				mockClient := mock.NewMockEC2Client()
 				tt.setup(mockClient)
-				cmd.SetContext(context.WithValue(context.Background(), "ec2_client", mockClient))
+				cmd.SetContext(testutil.GetTestContextWithClient(mockClient))
 			}
 
 			err := testutil.SetupTestCommand(cmd, tt.args)
+
 			if tt.wantError {
-				if err == nil {
-					t.Errorf("expected error containing %q, got nil", tt.errMsg)
-				} else if tt.errMsg != "" {
+				assert.Error(t, err)
+				if tt.errMsg != "" {
 					assert.Contains(t, err.Error(), tt.errMsg)
 				}
-			} else if err != nil {
-				t.Errorf("unexpected error: %v", err)
+			} else {
+				assert.NoError(t, err)
 			}
 		})
 	}

@@ -33,5 +33,7 @@ func init() {
 	rootCmd.AddCommand(BackupCmd)
 
 	BackupCmd.Flags().StringVarP(&backupInstanceID, "instance", "i", "", "Instance ID to backup")
-	BackupCmd.MarkFlagRequired("instance")
+	if err := BackupCmd.MarkFlagRequired("instance"); err != nil {
+		panic(err)
+	}
 }

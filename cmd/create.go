@@ -60,7 +60,13 @@ func init() {
 	CreateCmd.Flags().StringVarP(&subnetID, "subnet", "s", "", "Subnet ID")
 	CreateCmd.Flags().StringVarP(&userData, "userdata", "u", "", "User data script")
 
-	CreateCmd.MarkFlagRequired("image")
-	CreateCmd.MarkFlagRequired("key")
-	CreateCmd.MarkFlagRequired("subnet")
+	if err := CreateCmd.MarkFlagRequired("image"); err != nil {
+		panic(err)
+	}
+	if err := CreateCmd.MarkFlagRequired("key"); err != nil {
+		panic(err)
+	}
+	if err := CreateCmd.MarkFlagRequired("subnet"); err != nil {
+		panic(err)
+	}
 }
