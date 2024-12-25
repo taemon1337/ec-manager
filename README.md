@@ -53,9 +53,19 @@ docker run --rm \
 - `list`: List your EC2 instances
 - `restore`: Restore an instance from a snapshot
 
-### AMI Migration
+### AMI Management
 - `check`: Check various aspects of your AWS resources
+- `check migrate`: Check instances that need AMI migration
 - `migrate`: Migrate an EC2 instance to a new AMI
+- `list amis`: List available AMIs in your account
+
+### Resource Listing
+- `list instances`: List all EC2 instances
+- `list keys`: List available SSH key pairs
+- `list subnets`: List available VPC subnets
+
+### Authentication and Credentials
+- `check credentials`: Verify AWS credentials and permissions
 
 ### Common Tasks
 
