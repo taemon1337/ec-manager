@@ -12,17 +12,10 @@ import (
 // RestoreInstance restores an instance from a snapshot
 func (s *Service) RestoreInstance(ctx context.Context, instanceID, snapshotID string) error {
 	// Get instance
-	input := &ec2.DescribeInstancesInput{
-		InstanceIds: []string{instanceID},
-	}
-	result, err := s.client.DescribeInstances(ctx, input)
+	instance, err := s.GetInstance(ctx, instanceID)
 	if err != nil {
-		return fmt.Errorf("failed to get instance: %w", err)
+		return err
 	}
-	if len(result.Reservations) == 0 || len(result.Reservations[0].Instances) == 0 {
-		return fmt.Errorf("instance not found: %s", instanceID)
-	}
-	instance := result.Reservations[0].Instances[0]
 
 	// Get snapshot
 	snapInput := &ec2.DescribeSnapshotsInput{

@@ -6,6 +6,14 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 )
 
+// ContextKey type for context keys
+type ContextKey string
+
+const (
+	// EC2ClientKey is the context key for the EC2 client
+	EC2ClientKey ContextKey = "ec2-client"
+)
+
 // EC2Client is the interface for EC2 operations
 type EC2Client interface {
 	DescribeInstances(ctx context.Context, params *ec2.DescribeInstancesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error)

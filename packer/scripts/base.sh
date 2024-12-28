@@ -14,8 +14,8 @@ if [ -f /etc/debian_version ]; then
         unzip
 elif [ -f /etc/redhat-release ]; then
     # RHEL/CentOS
-    sudo dnf update -y
-    sudo dnf install -y \
+    echo "Installing base packages..."
+    sudo dnf install -y --skip-broken \
         curl \
         wget \
         git \

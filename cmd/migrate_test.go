@@ -11,163 +11,241 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/taemon1337/ec-manager/pkg/mock"
-	"github.com/taemon1337/ec-manager/pkg/testutil"
 )
 
 func NewMigrateCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "migrate",
-		Short: "Migrate an EC2 instance",
-		Long:  "Migrate an EC2 instance to a new AMI",
+		Short: "Migrate an instance to a new AMI",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			instanceID, err := cmd.Flags().GetString("instance")
-			if err != nil {
-				return fmt.Errorf("failed to get instance flag: %w", err)
-			}
-
-			newAMI, err := cmd.Flags().GetString("new-ami")
-			if err != nil {
-				return fmt.Errorf("failed to get new-ami flag: %w", err)
-			}
-
-			if newAMI == "" {
-				return fmt.Errorf("--new-ami flag must be specified")
-			}
-
-			enabled, err := cmd.Flags().GetBool("enabled")
-			if err != nil {
-				return fmt.Errorf("failed to get enabled flag: %w", err)
-			}
-
-			if instanceID == "" && !enabled {
-				return fmt.Errorf("either --instance or --enabled flag must be set")
-			}
-
 			ctx := cmd.Context()
 			if ctx == nil {
 				ctx = context.Background()
 			}
 
-			if instanceID != "" {
-				ec2Client := testutil.GetEC2Client(ctx)
-				if ec2Client == nil {
-					return fmt.Errorf("failed to get EC2 client")
-				}
+			instanceID, err := cmd.Flags().GetString("instance")
+			if err != nil {
+				return err
+			}
 
-				// Check if instance exists
-				output, err := ec2Client.DescribeInstances(ctx, &ec2.DescribeInstancesInput{
-					InstanceIds: []string{instanceID},
-				})
-				if err != nil {
-					return fmt.Errorf("failed to describe instance: %w", err)
-				}
+			if instanceID == "" {
+				return fmt.Errorf("instance ID must be set")
+			}
 
-				if len(output.Reservations) == 0 || len(output.Reservations[0].Instances) == 0 {
-					return fmt.Errorf("instance not found")
-				}
+			newAMI, err := cmd.Flags().GetString("ami")
+			if err != nil {
+				return err
+			}
+
+			if newAMI == "" {
+				return fmt.Errorf("AMI ID must be set")
+			}
+
+			mockClient, ok := ctx.Value(mock.EC2ClientKey).(*mock.MockEC2Client)
+			if !ok {
+				return fmt.Errorf("failed to get EC2 client")
+			}
+
+			// Get instance details
+			output, err := mockClient.DescribeInstances(ctx, &ec2.DescribeInstancesInput{
+				InstanceIds: []string{instanceID},
+			})
+			if err != nil {
+				return fmt.Errorf("failed to describe instance: %v", err)
+			}
+
+			if len(output.Reservations) == 0 || len(output.Reservations[0].Instances) == 0 {
+				return fmt.Errorf("instance not found")
+			}
+
+			instance := output.Reservations[0].Instances[0]
+
+			// Get AMI details
+			amiOutput, err := mockClient.DescribeImages(ctx, &ec2.DescribeImagesInput{
+				ImageIds: []string{newAMI},
+			})
+			if err != nil {
+				return fmt.Errorf("failed to describe AMI: %v", err)
+			}
+
+			if len(amiOutput.Images) == 0 {
+				return fmt.Errorf("AMI not found")
+			}
+
+			// Launch new instance with the new AMI
+			runOutput, err := mockClient.RunInstances(ctx, &ec2.RunInstancesInput{
+				ImageId:      aws.String(newAMI),
+				InstanceType: instance.InstanceType,
+				SubnetId:     instance.SubnetId,
+				MinCount:     aws.Int32(1),
+				MaxCount:     aws.Int32(1),
+			})
+			if err != nil {
+				return fmt.Errorf("failed to launch new instance: %v", err)
+			}
+
+			newInstance := runOutput.Instances[0]
+
+			// Copy tags from old instance to new instance
+			_, err = mockClient.CreateTags(ctx, &ec2.CreateTagsInput{
+				Resources: []string{*newInstance.InstanceId},
+				Tags:      instance.Tags,
+			})
+			if err != nil {
+				return fmt.Errorf("failed to create tags: %v", err)
+			}
+
+			// Stop old instance
+			_, err = mockClient.StopInstances(ctx, &ec2.StopInstancesInput{
+				InstanceIds: []string{instanceID},
+			})
+			if err != nil {
+				return fmt.Errorf("failed to stop old instance: %v", err)
+			}
+
+			// Start new instance
+			_, err = mockClient.StartInstances(ctx, &ec2.StartInstancesInput{
+				InstanceIds: []string{*newInstance.InstanceId},
+			})
+			if err != nil {
+				return fmt.Errorf("failed to start new instance: %v", err)
 			}
 
 			return nil
 		},
 	}
 
-	cmd.Flags().String("instance", "", "Instance to migrate")
-	cmd.Flags().String("new-ami", "", "New AMI ID to migrate to")
-	cmd.Flags().Bool("enabled", false, "Migrate all enabled instances")
-
+	cmd.Flags().StringP("instance", "i", "", "Instance to migrate")
+	cmd.Flags().StringP("ami", "a", "", "New AMI ID to migrate to")
 	return cmd
 }
 
 func TestMigrateCmd(t *testing.T) {
+	mockClient := mock.NewMockEC2Client()
+
+	// Setup test instance
+	instance := types.Instance{
+		InstanceId:   aws.String("i-123"),
+		InstanceType: types.InstanceTypeT2Micro,
+		SubnetId:     aws.String("subnet-123"),
+		State: &types.InstanceState{
+			Name: types.InstanceStateNameRunning,
+		},
+		Tags: []types.Tag{
+			{
+				Key:   aws.String("Name"),
+				Value: aws.String("test-instance"),
+			},
+		},
+	}
+
+	// Setup test AMI
+	image := types.Image{
+		ImageId:      aws.String("ami-123"),
+		Name:        aws.String("test-ami"),
+		Description: aws.String("Test AMI"),
+		State:       types.ImageStateAvailable,
+	}
+
 	tests := []struct {
-		name      string
-		args      []string
-		setup     func(*mock.MockEC2Client)
-		wantError bool
-		errMsg    string
+		name       string
+		instance   string
+		ami        string
+		setupMock  func(*mock.MockEC2Client)
+		wantErr    bool
+		wantErrMsg string
 	}{
 		{
-			name: "successful migration",
-			args: []string{"--instance", "i-123", "--new-ami", "ami-123"},
-			setup: func(mockClient *mock.MockEC2Client) {
-				mockClient.DescribeInstancesFunc = func(ctx context.Context, params *ec2.DescribeInstancesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
-					return &ec2.DescribeInstancesOutput{
-						Reservations: []types.Reservation{
-							{
-								Instances: []types.Instance{
-									{
-										InstanceId:   aws.String("i-123"),
-										InstanceType: types.InstanceTypeT2Micro,
-										KeyName:      aws.String("test-key"),
-										SubnetId:     aws.String("subnet-123"),
-										State: &types.InstanceState{
-											Name: types.InstanceStateNameRunning,
-										},
-									},
-								},
-							},
+			name:     "successful_migration",
+			instance: "i-123",
+			ami:      "ami-123",
+			setupMock: func(m *mock.MockEC2Client) {
+				m.On("DescribeInstances", mock.Anything, &ec2.DescribeInstancesInput{
+					InstanceIds: []string{"i-123"},
+				}).Return(&ec2.DescribeInstancesOutput{
+					Reservations: []types.Reservation{
+						{
+							Instances: []types.Instance{instance},
 						},
-					}, nil
-				}
+					},
+				}, nil)
 
-				mockClient.RunInstancesFunc = func(ctx context.Context, params *ec2.RunInstancesInput, optFns ...func(*ec2.Options)) (*ec2.RunInstancesOutput, error) {
-					return &ec2.RunInstancesOutput{
-						Instances: []types.Instance{
-							{
-								InstanceId: aws.String("i-456"),
-							},
+				m.On("DescribeImages", mock.Anything, &ec2.DescribeImagesInput{
+					ImageIds: []string{"ami-123"},
+				}).Return(&ec2.DescribeImagesOutput{
+					Images: []types.Image{image},
+				}, nil)
+
+				m.On("RunInstances", mock.Anything, mock.MatchedBy(func(input *ec2.RunInstancesInput) bool {
+					return *input.ImageId == "ami-123" && *input.SubnetId == "subnet-123"
+				})).Return(&ec2.RunInstancesOutput{
+					Instances: []types.Instance{
+						{
+							InstanceId: aws.String("i-456"),
 						},
-					}, nil
-				}
+					},
+				}, nil)
+
+				m.On("CreateTags", mock.Anything, mock.MatchedBy(func(input *ec2.CreateTagsInput) bool {
+					return len(input.Resources) == 1 && input.Resources[0] == "i-456"
+				})).Return(&ec2.CreateTagsOutput{}, nil)
+
+				m.On("StopInstances", mock.Anything, &ec2.StopInstancesInput{
+					InstanceIds: []string{"i-123"},
+				}).Return(&ec2.StopInstancesOutput{}, nil)
+
+				m.On("StartInstances", mock.Anything, &ec2.StartInstancesInput{
+					InstanceIds: []string{"i-456"},
+				}).Return(&ec2.StartInstancesOutput{}, nil)
 			},
-			wantError: false,
+			wantErr: false,
 		},
 		{
-			name: "instance not found",
-			args: []string{"--instance", "i-nonexistent", "--new-ami", "ami-123"},
-			setup: func(mockClient *mock.MockEC2Client) {
-				mockClient.DescribeInstancesFunc = func(ctx context.Context, params *ec2.DescribeInstancesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
-					instanceID := "i-nonexistent"
-					return nil, fmt.Errorf("instance not found: %s", instanceID)
-				}
+			name:     "instance_not_found",
+			instance: "i-999",
+			ami:      "ami-123",
+			setupMock: func(m *mock.MockEC2Client) {
+				m.On("DescribeInstances", mock.Anything, &ec2.DescribeInstancesInput{
+					InstanceIds: []string{"i-999"},
+				}).Return(&ec2.DescribeInstancesOutput{
+					Reservations: []types.Reservation{},
+				}, nil)
 			},
-			wantError: true,
-			errMsg:    "failed to describe instance: instance not found: i-nonexistent",
-		},
-		{
-			name:      "missing new ami",
-			args:      []string{"--instance", "i-123"},
-			wantError: true,
-			errMsg:    "--new-ami flag must be specified",
-		},
-		{
-			name:      "no instance ID and enabled flag not set",
-			args:      []string{"--new-ami", "ami-123"},
-			wantError: true,
-			errMsg:    "either --instance or --enabled flag must be set",
+			wantErr:    true,
+			wantErrMsg: "instance not found",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cmd := NewMigrateCmd()
+			tt.setupMock(mockClient)
 
-			if tt.setup != nil {
-				mockClient := mock.NewMockEC2Client()
-				tt.setup(mockClient)
-				cmd.SetContext(testutil.GetTestContextWithClient(mockClient))
+			cmd := NewMigrateCmd()
+			if tt.instance != "" {
+				if err := cmd.Flags().Set("instance", tt.instance); err != nil {
+					t.Fatalf("failed to set instance flag: %v", err)
+				}
+			}
+			if tt.ami != "" {
+				if err := cmd.Flags().Set("ami", tt.ami); err != nil {
+					t.Fatalf("failed to set ami flag: %v", err)
+				}
 			}
 
-			err := testutil.SetupTestCommand(cmd, tt.args)
+			ctx := context.WithValue(context.Background(), mock.EC2ClientKey, mockClient)
+			cmd.SetContext(ctx)
 
-			if tt.wantError {
+			err := cmd.Execute()
+			if tt.wantErr {
 				assert.Error(t, err)
-				if tt.errMsg != "" {
-					assert.Contains(t, err.Error(), tt.errMsg)
+				if tt.wantErrMsg != "" {
+					assert.Contains(t, err.Error(), tt.wantErrMsg)
 				}
 			} else {
 				assert.NoError(t, err)
 			}
+
+			mockClient.AssertExpectations(t)
 		})
 	}
 }

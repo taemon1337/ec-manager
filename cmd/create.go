@@ -95,13 +95,16 @@ var CreateCmd = &cobra.Command{
 func init() {
 	rootCmd.AddCommand(CreateCmd)
 
-	CreateCmd.Flags().StringVar(&imageID, "image", "", "AMI ID to use for the instance")
-	CreateCmd.Flags().StringVar(&instanceType, "type", "t2.micro", "Instance type")
-	CreateCmd.Flags().StringVar(&keyName, "key", "", "SSH key name")
-	CreateCmd.Flags().StringVar(&subnetID, "subnet", "", "Subnet ID")
-	CreateCmd.Flags().StringVar(&userData, "userdata", "", "User data script")
-	CreateCmd.Flags().BoolVar(&useLatestAmi, "latest", false, "Use the latest AMI with tag ami-migrate=latest")
+	CreateCmd.Flags().String("key", "", "SSH key name")
+	CreateCmd.Flags().String("subnet", "", "Subnet ID")
+	CreateCmd.Flags().String("ami", "", "AMI ID")
+	CreateCmd.Flags().String("type", "t2.micro", "Instance type")
+	CreateCmd.Flags().String("name", "", "Instance name")
 
-	CreateCmd.MarkFlagRequired("key")
-	CreateCmd.MarkFlagRequired("subnet")
+	if err := CreateCmd.MarkFlagRequired("key"); err != nil {
+		panic(err)
+	}
+	if err := CreateCmd.MarkFlagRequired("subnet"); err != nil {
+		panic(err)
+	}
 }

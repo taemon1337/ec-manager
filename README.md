@@ -52,6 +52,7 @@ docker run --rm \
 - `delete`: Delete an EC2 instance
 - `list`: List your EC2 instances
 - `restore`: Restore an instance from a snapshot
+- `ssh`: SSH into an EC2 instance
 
 ### AMI Management
 - `check`: Check various aspects of your AWS resources
@@ -141,6 +142,20 @@ ecman restore \
   --instance-id i-1234567890abcdef0 \
   --snapshot-id snap-xxxxx
 ```
+
+#### 6. SSH into an Instance
+```bash
+# SSH into a specific instance
+ecman ssh \
+  --instance i-1234567890abcdef0 \
+  --key ~/.ssh/my-key.pem \
+  --user ec2-user
+```
+
+Options:
+- `--instance` or `-i`: ID of the instance to connect to
+- `--key` or `-k`: Path to the SSH private key file
+- `--user` or `-u`: SSH user (defaults to ec2-user)
 
 ## Global Flags
 

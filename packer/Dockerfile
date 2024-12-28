@@ -12,9 +12,5 @@ WORKDIR /workspace
 # Copy Packer configurations
 COPY . .
 
-# Initialize Packer plugins during build
-RUN packer init rhel9/rhel9.pkr.hcl && \
-    packer init ubuntu/ubuntu.pkr.hcl
-
 # Default command
 ENTRYPOINT ["packer"]

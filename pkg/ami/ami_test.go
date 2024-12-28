@@ -2,322 +2,482 @@ package ami
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
-	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/suite"
+	localmock "github.com/taemon1337/ec-manager/pkg/mock"
 )
 
-type mockEC2Client struct {
-	DescribeInstancesFunc  func(ctx context.Context, params *ec2.DescribeInstancesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error)
-	DescribeImagesFunc     func(ctx context.Context, params *ec2.DescribeImagesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeImagesOutput, error)
-	CreateTagsFunc         func(ctx context.Context, params *ec2.CreateTagsInput, optFns ...func(*ec2.Options)) (*ec2.CreateTagsOutput, error)
-	RunInstancesFunc       func(ctx context.Context, params *ec2.RunInstancesInput, optFns ...func(*ec2.Options)) (*ec2.RunInstancesOutput, error)
-	StopInstancesFunc      func(ctx context.Context, params *ec2.StopInstancesInput, optFns ...func(*ec2.Options)) (*ec2.StopInstancesOutput, error)
-	StartInstancesFunc     func(ctx context.Context, params *ec2.StartInstancesInput, optFns ...func(*ec2.Options)) (*ec2.StartInstancesOutput, error)
-	AttachVolumeFunc       func(ctx context.Context, params *ec2.AttachVolumeInput, optFns ...func(*ec2.Options)) (*ec2.AttachVolumeOutput, error)
-	CreateSnapshotFunc     func(ctx context.Context, params *ec2.CreateSnapshotInput, optFns ...func(*ec2.Options)) (*ec2.CreateSnapshotOutput, error)
-	TerminateInstancesFunc func(ctx context.Context, params *ec2.TerminateInstancesInput, optFns ...func(*ec2.Options)) (*ec2.TerminateInstancesOutput, error)
-	CreateVolumeFunc       func(ctx context.Context, params *ec2.CreateVolumeInput, optFns ...func(*ec2.Options)) (*ec2.CreateVolumeOutput, error)
-	CreateImageFunc        func(ctx context.Context, params *ec2.CreateImageInput, optFns ...func(*ec2.Options)) (*ec2.CreateImageOutput, error)
-	DescribeSnapshotsFunc  func(ctx context.Context, params *ec2.DescribeSnapshotsInput, optFns ...func(*ec2.Options)) (*ec2.DescribeSnapshotsOutput, error)
-	DescribeVolumesFunc    func(ctx context.Context, params *ec2.DescribeVolumesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeVolumesOutput, error)
-	DescribeSubnetsFunc    func(ctx context.Context, params *ec2.DescribeSubnetsInput, optFns ...func(*ec2.Options)) (*ec2.DescribeSubnetsOutput, error)
-	DescribeKeyPairsFunc   func(ctx context.Context, params *ec2.DescribeKeyPairsInput, optFns ...func(*ec2.Options)) (*ec2.DescribeKeyPairsOutput, error)
+// AMITestSuite defines a test suite for AMI-related tests
+type AMITestSuite struct {
+	suite.Suite
+	mockClient *localmock.MockEC2Client
+	service    *Service
 }
 
-func (m *mockEC2Client) DescribeInstances(ctx context.Context, params *ec2.DescribeInstancesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
-	if m.DescribeInstancesFunc != nil {
-		return m.DescribeInstancesFunc(ctx, params, optFns...)
-	}
-	return nil, nil
+// SetupTest runs before each test
+func (s *AMITestSuite) SetupTest() {
+	s.mockClient = localmock.NewMockEC2Client()
+	s.service = NewService(s.mockClient)
 }
 
-func (m *mockEC2Client) DescribeImages(ctx context.Context, params *ec2.DescribeImagesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeImagesOutput, error) {
-	if m.DescribeImagesFunc != nil {
-		return m.DescribeImagesFunc(ctx, params, optFns...)
-	}
-	return nil, nil
+// TearDownTest runs after each test
+func (s *AMITestSuite) TearDownTest() {
+	s.mockClient.AssertExpectations(s.T())
 }
 
-func (m *mockEC2Client) CreateTags(ctx context.Context, params *ec2.CreateTagsInput, optFns ...func(*ec2.Options)) (*ec2.CreateTagsOutput, error) {
-	if m.CreateTagsFunc != nil {
-		return m.CreateTagsFunc(ctx, params, optFns...)
-	}
-	return nil, nil
+// TestAMISuite runs the test suite
+func TestAMISuite(t *testing.T) {
+	suite.Run(t, new(AMITestSuite))
 }
 
-func (m *mockEC2Client) RunInstances(ctx context.Context, params *ec2.RunInstancesInput, optFns ...func(*ec2.Options)) (*ec2.RunInstancesOutput, error) {
-	if m.RunInstancesFunc != nil {
-		return m.RunInstancesFunc(ctx, params, optFns...)
-	}
-	return nil, nil
-}
-
-func (m *mockEC2Client) StopInstances(ctx context.Context, params *ec2.StopInstancesInput, optFns ...func(*ec2.Options)) (*ec2.StopInstancesOutput, error) {
-	if m.StopInstancesFunc != nil {
-		return m.StopInstancesFunc(ctx, params, optFns...)
-	}
-	return nil, nil
-}
-
-func (m *mockEC2Client) StartInstances(ctx context.Context, params *ec2.StartInstancesInput, optFns ...func(*ec2.Options)) (*ec2.StartInstancesOutput, error) {
-	if m.StartInstancesFunc != nil {
-		return m.StartInstancesFunc(ctx, params, optFns...)
-	}
-	return nil, nil
-}
-
-func (m *mockEC2Client) AttachVolume(ctx context.Context, params *ec2.AttachVolumeInput, optFns ...func(*ec2.Options)) (*ec2.AttachVolumeOutput, error) {
-	if m.AttachVolumeFunc != nil {
-		return m.AttachVolumeFunc(ctx, params, optFns...)
-	}
-	return nil, nil
-}
-
-func (m *mockEC2Client) CreateSnapshot(ctx context.Context, params *ec2.CreateSnapshotInput, optFns ...func(*ec2.Options)) (*ec2.CreateSnapshotOutput, error) {
-	if m.CreateSnapshotFunc != nil {
-		return m.CreateSnapshotFunc(ctx, params, optFns...)
-	}
-	return nil, nil
-}
-
-func (m *mockEC2Client) TerminateInstances(ctx context.Context, params *ec2.TerminateInstancesInput, optFns ...func(*ec2.Options)) (*ec2.TerminateInstancesOutput, error) {
-	if m.TerminateInstancesFunc != nil {
-		return m.TerminateInstancesFunc(ctx, params, optFns...)
-	}
-	return nil, nil
-}
-
-func (m *mockEC2Client) CreateVolume(ctx context.Context, params *ec2.CreateVolumeInput, optFns ...func(*ec2.Options)) (*ec2.CreateVolumeOutput, error) {
-	if m.CreateVolumeFunc != nil {
-		return m.CreateVolumeFunc(ctx, params, optFns...)
-	}
-	return nil, nil
-}
-
-func (m *mockEC2Client) CreateImage(ctx context.Context, params *ec2.CreateImageInput, optFns ...func(*ec2.Options)) (*ec2.CreateImageOutput, error) {
-	if m.CreateImageFunc != nil {
-		return m.CreateImageFunc(ctx, params, optFns...)
-	}
-	return nil, nil
-}
-
-func (m *mockEC2Client) DescribeSnapshots(ctx context.Context, params *ec2.DescribeSnapshotsInput, optFns ...func(*ec2.Options)) (*ec2.DescribeSnapshotsOutput, error) {
-	if m.DescribeSnapshotsFunc != nil {
-		return m.DescribeSnapshotsFunc(ctx, params, optFns...)
-	}
-	return nil, nil
-}
-
-func (m *mockEC2Client) DescribeVolumes(ctx context.Context, params *ec2.DescribeVolumesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeVolumesOutput, error) {
-	if m.DescribeVolumesFunc != nil {
-		return m.DescribeVolumesFunc(ctx, params, optFns...)
-	}
-	return nil, nil
-}
-
-func (m *mockEC2Client) DescribeSubnets(ctx context.Context, params *ec2.DescribeSubnetsInput, optFns ...func(*ec2.Options)) (*ec2.DescribeSubnetsOutput, error) {
-	if m.DescribeSubnetsFunc != nil {
-		return m.DescribeSubnetsFunc(ctx, params, optFns...)
-	}
-	return nil, nil
-}
-
-func (m *mockEC2Client) DescribeKeyPairs(ctx context.Context, params *ec2.DescribeKeyPairsInput, optFns ...func(*ec2.Options)) (*ec2.DescribeKeyPairsOutput, error) {
-	if m.DescribeKeyPairsFunc != nil {
-		return m.DescribeKeyPairsFunc(ctx, params, optFns...)
-	}
-	return nil, nil
-}
-
-func (m *mockEC2Client) NewInstanceRunningWaiter() *ec2.InstanceRunningWaiter {
-	return nil
-}
-
-func (m *mockEC2Client) NewInstanceStoppedWaiter() *ec2.InstanceStoppedWaiter {
-	return nil
-}
-
-func (m *mockEC2Client) NewInstanceTerminatedWaiter() *ec2.InstanceTerminatedWaiter {
-	return nil
-}
-
-func (m *mockEC2Client) NewVolumeAvailableWaiter() *ec2.VolumeAvailableWaiter {
-	return nil
-}
-
-func TestBackupInstance(t *testing.T) {
-	t.Run("success", func(t *testing.T) {
-		mockClient := &mockEC2Client{}
-		svc := NewService(mockClient)
-
-		mockClient.DescribeInstancesFunc = func(ctx context.Context, params *ec2.DescribeInstancesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
-			return &ec2.DescribeInstancesOutput{
-				Reservations: []types.Reservation{
-					{
-						Instances: []types.Instance{
-							{
-								InstanceId: aws.String("i-1234567890abcdef0"),
-								State: &types.InstanceState{
-									Name: types.InstanceStateNameRunning,
+func (s *AMITestSuite) TestCreateAMI() {
+	tests := []struct {
+		name          string
+		instanceID    string
+		amiName       string
+		description   string
+		mockSetup     func()
+		expectedError error
+		assertMock    func()
+	}{
+		{
+			name:        "success",
+			instanceID:  "i-123",
+			amiName:     "test-ami",
+			description: "test description",
+			mockSetup: func() {
+				// Mock DescribeInstances
+				s.mockClient.DescribeInstancesOutput = &ec2.DescribeInstancesOutput{
+					Reservations: []types.Reservation{
+						{
+							Instances: []types.Instance{
+								{
+									InstanceId: aws.String("i-123"),
 								},
 							},
 						},
 					},
-				},
-			}, nil
-		}
+				}
+				s.mockClient.On("DescribeInstances", mock.Anything, &ec2.DescribeInstancesInput{
+					InstanceIds: []string{"i-123"},
+				}).Return(s.mockClient.DescribeInstancesOutput, nil).Once()
 
-		mockClient.CreateImageFunc = func(ctx context.Context, params *ec2.CreateImageInput, optFns ...func(*ec2.Options)) (*ec2.CreateImageOutput, error) {
-			return &ec2.CreateImageOutput{
-				ImageId: aws.String("ami-1234567890abcdef0"),
-			}, nil
-		}
+				// Mock CreateImage
+				s.mockClient.CreateImageOutput = &ec2.CreateImageOutput{
+					ImageId: aws.String("ami-123"),
+				}
+				s.mockClient.On("CreateImage", mock.Anything, &ec2.CreateImageInput{
+					InstanceId:  aws.String("i-123"),
+					Name:        aws.String("test-ami"),
+					Description: aws.String("test description"),
+				}).Return(s.mockClient.CreateImageOutput, nil).Once()
 
-		mockClient.CreateTagsFunc = func(ctx context.Context, params *ec2.CreateTagsInput, optFns ...func(*ec2.Options)) (*ec2.CreateTagsOutput, error) {
-			return &ec2.CreateTagsOutput{}, nil
-		}
+				// Mock DescribeImages
+				s.mockClient.DescribeImagesOutput = &ec2.DescribeImagesOutput{
+					Images: []types.Image{
+						{
+							ImageId: aws.String("ami-123"),
+						},
+					},
+				}
+				s.mockClient.On("DescribeImages", mock.Anything, &ec2.DescribeImagesInput{
+					ImageIds: []string{"ami-123"},
+				}).Return(s.mockClient.DescribeImagesOutput, nil).Once()
 
-		ctx := context.Background()
-		imageID, err := svc.BackupInstance(ctx, "i-1234567890abcdef0")
-		assert.NoError(t, err)
-		assert.Equal(t, "ami-1234567890abcdef0", imageID)
-	})
-
-	t.Run("error", func(t *testing.T) {
-		mockClient := &mockEC2Client{}
-		svc := NewService(mockClient)
-
-		mockClient.DescribeInstancesFunc = func(ctx context.Context, params *ec2.DescribeInstancesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
-			return nil, fmt.Errorf("API error")
-		}
-
-		ctx := context.Background()
-		imageID, err := svc.BackupInstance(ctx, "i-1234567890abcdef0")
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "API error")
-		assert.Empty(t, imageID)
-	})
-}
-
-func TestMigrateInstance(t *testing.T) {
-	t.Run("success", func(t *testing.T) {
-		mockClient := &mockEC2Client{}
-		svc := NewService(mockClient)
-
-		mockClient.DescribeInstancesFunc = func(ctx context.Context, params *ec2.DescribeInstancesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
-			return &ec2.DescribeInstancesOutput{
-				Reservations: []types.Reservation{
-					{
-						Instances: []types.Instance{
-							{
-								InstanceId:   aws.String("i-1234567890abcdef0"),
-								InstanceType: types.InstanceTypeT2Micro,
-								KeyName:      aws.String("test-key"),
-								SubnetId:     aws.String("subnet-123"),
-								State: &types.InstanceState{
-									Name: types.InstanceStateNameRunning,
+				// Mock CreateTags
+				s.mockClient.CreateTagsOutput = &ec2.CreateTagsOutput{}
+				s.mockClient.On("CreateTags", mock.Anything, &ec2.CreateTagsInput{
+					Resources: []string{"ami-123"},
+					Tags: []types.Tag{
+						{
+							Key:   aws.String("Name"),
+							Value: aws.String("test-ami"),
+						},
+					},
+				}).Return(s.mockClient.CreateTagsOutput, nil).Once()
+			},
+		},
+		{
+			name:        "instance_not_found",
+			instanceID:  "i-123",
+			amiName:     "test-ami",
+			description: "test description",
+			mockSetup: func() {
+				// Mock DescribeInstances to return empty reservations
+				s.mockClient.DescribeInstancesOutput = &ec2.DescribeInstancesOutput{
+					Reservations: []types.Reservation{},
+				}
+				s.mockClient.On("DescribeInstances", mock.Anything, &ec2.DescribeInstancesInput{
+					InstanceIds: []string{"i-123"},
+				}).Return(s.mockClient.DescribeInstancesOutput, nil).Once()
+			},
+			expectedError: ErrInstanceNotFound,
+		},
+		{
+			name:        "create_image_error",
+			instanceID:  "i-123",
+			amiName:     "test-ami",
+			description: "test description",
+			mockSetup: func() {
+				// Mock DescribeInstances to return a valid instance
+				s.mockClient.DescribeInstancesOutput = &ec2.DescribeInstancesOutput{
+					Reservations: []types.Reservation{
+						{
+							Instances: []types.Instance{
+								{
+									InstanceId: aws.String("i-123"),
 								},
 							},
 						},
 					},
-				},
-			}, nil
-		}
+				}
+				s.mockClient.On("DescribeInstances", mock.Anything, &ec2.DescribeInstancesInput{
+					InstanceIds: []string{"i-123"},
+				}).Return(s.mockClient.DescribeInstancesOutput, nil).Once()
 
-		mockClient.RunInstancesFunc = func(ctx context.Context, params *ec2.RunInstancesInput, optFns ...func(*ec2.Options)) (*ec2.RunInstancesOutput, error) {
-			return &ec2.RunInstancesOutput{
-				Instances: []types.Instance{
-					{
-						InstanceId: aws.String("i-0987654321fedcba0"),
-					},
-				},
-			}, nil
-		}
+				// Mock CreateImage to return an error
+				s.mockClient.CreateImageOutput = nil
+				s.mockClient.On("CreateImage", mock.Anything, &ec2.CreateImageInput{
+					InstanceId:  aws.String("i-123"),
+					Name:        aws.String("test-ami"),
+					Description: aws.String("test description"),
+				}).Return(s.mockClient.CreateImageOutput, ErrCreateImageFailed).Once()
+			},
+			expectedError: ErrCreateImageFailed,
+		},
+	}
 
-		mockClient.CreateTagsFunc = func(ctx context.Context, params *ec2.CreateTagsInput, optFns ...func(*ec2.Options)) (*ec2.CreateTagsOutput, error) {
-			return &ec2.CreateTagsOutput{}, nil
-		}
+	for _, tt := range tests {
+		s.Run(tt.name, func() {
+			tt.mockSetup()
 
-		ctx := context.Background()
-		newInstanceID, err := svc.MigrateInstance(ctx, "i-1234567890abcdef0", "ami-1234567890abcdef0")
-		assert.NoError(t, err)
-		assert.Equal(t, "i-0987654321fedcba0", newInstanceID)
-	})
-
-	t.Run("error", func(t *testing.T) {
-		mockClient := &mockEC2Client{}
-		svc := NewService(mockClient)
-
-		mockClient.DescribeInstancesFunc = func(ctx context.Context, params *ec2.DescribeInstancesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
-			return nil, fmt.Errorf("API error")
-		}
-
-		ctx := context.Background()
-		newInstanceID, err := svc.MigrateInstance(ctx, "i-1234567890abcdef0", "ami-1234567890abcdef0")
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "API error")
-		assert.Empty(t, newInstanceID)
-	})
+			_, err := s.service.CreateAMI(context.Background(), tt.instanceID, tt.amiName, tt.description)
+			if tt.expectedError != nil {
+				if err == nil {
+					s.Fail("Expected error but got nil")
+					return
+				}
+				s.ErrorIs(err, tt.expectedError)
+			} else {
+				s.NoError(err)
+			}
+			if tt.assertMock != nil {
+				tt.assertMock()
+			}
+		})
+	}
 }
 
-func TestDeleteInstance(t *testing.T) {
-	t.Run("success", func(t *testing.T) {
-		mockClient := &mockEC2Client{}
-		svc := NewService(mockClient)
-
-		mockClient.DescribeInstancesFunc = func(ctx context.Context, params *ec2.DescribeInstancesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
-			return &ec2.DescribeInstancesOutput{
-				Reservations: []types.Reservation{
-					{
-						Instances: []types.Instance{
-							{
-								InstanceId: aws.String("i-1234567890abcdef0"),
-								State: &types.InstanceState{
-									Name: types.InstanceStateNameRunning,
-								},
+func (s *AMITestSuite) TestFindAMI() {
+	tests := []struct {
+		name      string
+		amiName   string
+		setupMock func(*localmock.MockEC2Client)
+		want      *types.Image
+		wantErr   bool
+		errMsg    string
+	}{
+		{
+			name:    "success",
+			amiName: "test-ami",
+			setupMock: func(m *localmock.MockEC2Client) {
+				m.DescribeImagesOutput = &ec2.DescribeImagesOutput{
+					Images: []types.Image{
+						{
+							ImageId: aws.String("ami-123"),
+						},
+					},
+				}
+				m.On("DescribeImages", mock.Anything, &ec2.DescribeImagesInput{
+					Filters: []types.Filter{
+						{
+							Name: aws.String("name"),
+							Values: []string{
+								"test-ami",
 							},
 						},
 					},
-				},
-			}, nil
-		}
-
-		mockClient.TerminateInstancesFunc = func(ctx context.Context, params *ec2.TerminateInstancesInput, optFns ...func(*ec2.Options)) (*ec2.TerminateInstancesOutput, error) {
-			return &ec2.TerminateInstancesOutput{
-				TerminatingInstances: []types.InstanceStateChange{
-					{
-						CurrentState: &types.InstanceState{
-							Name: types.InstanceStateNameShuttingDown,
+				}).Return(m.DescribeImagesOutput, nil).Once()
+			},
+			want: &types.Image{
+				ImageId: aws.String("ami-123"),
+			},
+			wantErr: false,
+		},
+		{
+			name:    "ami_not_found",
+			amiName: "test-ami",
+			setupMock: func(m *localmock.MockEC2Client) {
+				m.DescribeImagesOutput = &ec2.DescribeImagesOutput{
+					Images: []types.Image{},
+				}
+				m.On("DescribeImages", mock.Anything, &ec2.DescribeImagesInput{
+					Filters: []types.Filter{
+						{
+							Name: aws.String("name"),
+							Values: []string{
+								"test-ami",
+							},
 						},
-						InstanceId: aws.String("i-1234567890abcdef0"),
 					},
-				},
-			}, nil
-		}
+				}).Return(m.DescribeImagesOutput, nil).Once()
+			},
+			want:    nil,
+			wantErr: true,
+			errMsg:  "AMI not found",
+		},
+		{
+			name:    "describe_images_failure",
+			amiName: "test-ami",
+			setupMock: func(m *localmock.MockEC2Client) {
+				m.On("DescribeImages", mock.Anything, &ec2.DescribeImagesInput{
+					Filters: []types.Filter{
+						{
+							Name: aws.String("name"),
+							Values: []string{
+								"test-ami",
+							},
+						},
+					},
+				}).Return(nil, fmt.Errorf("failed to describe images")).Once()
+			},
+			want:    nil,
+			wantErr: true,
+			errMsg:  "AMI not found",
+		},
+	}
 
-		ctx := context.Background()
-		state, err := svc.DeleteInstance(ctx, "i-1234567890abcdef0")
-		assert.NoError(t, err)
-		assert.Equal(t, string(types.InstanceStateNameShuttingDown), state)
-	})
+	for _, tt := range tests {
+		s.Run(tt.name, func() {
+			tt.setupMock(s.mockClient)
+			ami, err := s.service.FindAMI(context.Background(), tt.amiName)
+			if tt.wantErr {
+				s.Error(err)
+				if tt.errMsg != "" {
+					s.Contains(err.Error(), tt.errMsg)
+				}
+			} else {
+				s.NoError(err)
+				if tt.want != nil {
+					s.Equal(tt.want.ImageId, ami.ImageId)
+				}
+			}
+		})
+	}
+}
 
-	t.Run("error", func(t *testing.T) {
-		mockClient := &mockEC2Client{}
-		svc := NewService(mockClient)
+func (s *AMITestSuite) TestGetImage() {
+	tests := []struct {
+		name      string
+		imageID   string
+		setupMock func(*localmock.MockEC2Client)
+		want      *types.Image
+		wantErr   bool
+		errMsg    string
+	}{
+		{
+			name:    "success",
+			imageID: "ami-123",
+			setupMock: func(m *localmock.MockEC2Client) {
+				m.DescribeImagesOutput = &ec2.DescribeImagesOutput{
+					Images: []types.Image{
+						{
+							ImageId: aws.String("ami-123"),
+							Name:    aws.String("test-ami"),
+						},
+					},
+				}
+				m.On("DescribeImages", mock.Anything, &ec2.DescribeImagesInput{
+					ImageIds: []string{"ami-123"},
+				}).Return(m.DescribeImagesOutput, nil).Once()
+			},
+			want: &types.Image{
+				ImageId: aws.String("ami-123"),
+				Name:    aws.String("test-ami"),
+			},
+			wantErr: false,
+		},
+		{
+			name:    "ami_not_found",
+			imageID: "ami-999",
+			setupMock: func(m *localmock.MockEC2Client) {
+				m.DescribeImagesOutput = &ec2.DescribeImagesOutput{
+					Images: []types.Image{},
+				}
+				m.On("DescribeImages", mock.Anything, &ec2.DescribeImagesInput{
+					ImageIds: []string{"ami-999"},
+				}).Return(m.DescribeImagesOutput, nil).Once()
+			},
+			want:    nil,
+			wantErr: true,
+			errMsg:  "AMI not found: ami-999",
+		},
+		{
+			name:    "describe_images_error",
+			imageID: "ami-123",
+			setupMock: func(m *localmock.MockEC2Client) {
+				m.On("DescribeImages", mock.Anything, &ec2.DescribeImagesInput{
+					ImageIds: []string{"ami-123"},
+				}).Return(nil, fmt.Errorf("failed to describe images")).Once()
+			},
+			want:    nil,
+			wantErr: true,
+			errMsg:  "AMI not found: ami-123",
+		},
+	}
 
-		mockClient.DescribeInstancesFunc = func(ctx context.Context, params *ec2.DescribeInstancesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
-			return nil, fmt.Errorf("API error")
-		}
+	for _, tt := range tests {
+		s.Run(tt.name, func() {
+			tt.setupMock(s.mockClient)
+			ami, err := s.service.GetImage(context.Background(), tt.imageID)
+			if tt.wantErr {
+				s.Error(err)
+				if tt.errMsg != "" {
+					s.Contains(err.Error(), tt.errMsg)
+				}
+			} else {
+				s.NoError(err)
+				s.Equal(tt.want.ImageId, ami.ImageId)
+				s.Equal(tt.want.Name, ami.Name)
+			}
+		})
+	}
+}
 
-		ctx := context.Background()
-		state, err := svc.DeleteInstance(ctx, "i-1234567890abcdef0")
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "API error")
-		assert.Empty(t, state)
-	})
+func (s *AMITestSuite) TestLaunchInstance() {
+	tests := []struct {
+		name      string
+		amiID     string
+		amiName   string
+		setupMock func(*localmock.MockEC2Client)
+		want      *types.Instance
+		wantErr   bool
+		errMsg    string
+	}{
+		{
+			name:    "success",
+			amiID:   "ami-123",
+			amiName: "test-ami",
+			setupMock: func(m *localmock.MockEC2Client) {
+				m.RunInstancesOutput = &ec2.RunInstancesOutput{
+					Instances: []types.Instance{
+						{
+							InstanceId: aws.String("i-123"),
+							ImageId:    aws.String("ami-123"),
+						},
+					},
+				}
+
+				m.On("RunInstances", mock.Anything, &ec2.RunInstancesInput{
+					ImageId:      aws.String("ami-123"),
+					InstanceType: types.InstanceTypeT2Micro,
+					MinCount:     aws.Int32(1),
+					MaxCount:     aws.Int32(1),
+				}).Return(m.RunInstancesOutput, nil).Once()
+
+				// Mock CreateTags
+				m.CreateTagsOutput = &ec2.CreateTagsOutput{}
+				m.On("CreateTags", mock.Anything, &ec2.CreateTagsInput{
+					Resources: []string{"i-123"},
+					Tags: []types.Tag{
+						{
+							Key:   aws.String("Name"),
+							Value: aws.String("test-ami"),
+						},
+					},
+				}).Return(m.CreateTagsOutput, nil).Once()
+			},
+			want: &types.Instance{
+				InstanceId: aws.String("i-123"),
+				ImageId:    aws.String("ami-123"),
+			},
+			wantErr: false,
+		},
+		{
+			name:    "run_instances_error",
+			amiID:   "ami-123",
+			amiName: "test-ami",
+			setupMock: func(m *localmock.MockEC2Client) {
+				m.On("RunInstances", mock.Anything, &ec2.RunInstancesInput{
+					ImageId:      aws.String("ami-123"),
+					InstanceType: types.InstanceTypeT2Micro,
+					MinCount:     aws.Int32(1),
+					MaxCount:     aws.Int32(1),
+				}).Return(&ec2.RunInstancesOutput{
+					Instances: []types.Instance{},
+				}, fmt.Errorf("failed to launch instance")).Once()
+			},
+			want:    nil,
+			wantErr: true,
+			errMsg:  "failed to launch instance: failed to launch instance",
+		},
+		{
+			name:    "create_tags_error",
+			amiID:   "ami-123",
+			amiName: "test-ami",
+			setupMock: func(m *localmock.MockEC2Client) {
+				// Mock RunInstances to succeed
+				m.On("RunInstances", mock.Anything, &ec2.RunInstancesInput{
+					ImageId:      aws.String("ami-123"),
+					InstanceType: types.InstanceTypeT2Micro,
+					MinCount:     aws.Int32(1),
+					MaxCount:     aws.Int32(1),
+				}).Return(&ec2.RunInstancesOutput{
+					Instances: []types.Instance{
+						{
+							InstanceId: aws.String("i-123"),
+							ImageId:    aws.String("ami-123"),
+						},
+					},
+				}, nil).Once()
+
+				// Mock CreateTags to fail
+				m.On("CreateTags", mock.Anything, &ec2.CreateTagsInput{
+					Resources: []string{"i-123"},
+					Tags: []types.Tag{
+						{
+							Key:   aws.String("Name"),
+							Value: aws.String("test-ami"),
+						},
+					},
+				}).Return(&ec2.CreateTagsOutput{}, fmt.Errorf("failed to create tags")).Once()
+			},
+			want:    nil,
+			wantErr: true,
+			errMsg:  "failed to create tags: failed to create tags",
+		},
+	}
+
+	for _, tt := range tests {
+		s.Run(tt.name, func() {
+			tt.setupMock(s.mockClient)
+			instance, err := s.service.LaunchInstance(context.Background(), tt.amiID, tt.amiName)
+			if tt.wantErr {
+				s.Error(err)
+				if tt.errMsg != "" && err != nil {
+					s.T().Logf("Expected error: %q", tt.errMsg)
+					s.T().Logf("Actual error: %q", err.Error())
+					switch tt.name {
+					case "run_instances_error":
+						s.True(errors.Is(err, ErrRunInstances))
+					case "create_tags_error":
+						s.True(errors.Is(err, ErrCreateTags))
+					default:
+						s.Contains(err.Error(), tt.errMsg)
+					}
+				}
+			} else {
+				s.NoError(err)
+				s.Equal(tt.want.InstanceId, instance.InstanceId)
+				s.Equal(tt.want.ImageId, instance.ImageId)
+			}
+		})
+	}
 }

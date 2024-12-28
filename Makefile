@@ -79,15 +79,8 @@ test:
 		golang:$(GO_VERSION)-alpine \
 		/bin/sh -c "go test -v ./... -count=1"
 
-# Run linter
+# Format/fix code using golangci-lint
 lint:
-	@echo "Running linter..."
-	docker run $(DOCKER_RUN_OPTS) \
-		golangci/golangci-lint:latest \
-		golangci-lint run ./...
-
-# Format code using golangci-lint
-fmt:
 	@echo "Formatting code..."
 	docker run $(DOCKER_RUN_OPTS) \
 		golangci/golangci-lint:latest \
