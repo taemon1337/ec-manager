@@ -26,24 +26,35 @@ func TestCheckMigrateCmd(t *testing.T) {
 	var buf bytes.Buffer
 	mockSvc := &mockAMIService{}
 
-	cmd := &cobra.Command{
-		Use: "check-migrate",
+	// Create a new root command
+	rootCmd := &cobra.Command{Use: "root"}
+	
+	// Create the check command
+	checkCmd := &cobra.Command{Use: "check"}
+	rootCmd.AddCommand(checkCmd)
+
+	// Create the migrate subcommand
+	checkMigrateCmd := &cobra.Command{
+		Use: "migrate",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return mockSvc.ListUserInstances(cmd.Context())
 		},
 	}
+	checkCmd.AddCommand(checkMigrateCmd)
 
 	t.Run("success", func(t *testing.T) {
 		mockSvc.mockError = nil
-		cmd.SetOut(&buf)
-		err := cmd.Execute()
+		rootCmd.SetOut(&buf)
+		rootCmd.SetArgs([]string{"check", "migrate"})
+		err := rootCmd.Execute()
 		assert.NoError(t, err)
 	})
 
 	t.Run("error", func(t *testing.T) {
 		mockSvc.mockError = fmt.Errorf("API error")
-		cmd.SetOut(&buf)
-		err := cmd.Execute()
+		rootCmd.SetOut(&buf)
+		rootCmd.SetArgs([]string{"check", "migrate"})
+		err := rootCmd.Execute()
 		assert.Error(t, err)
 	})
 }

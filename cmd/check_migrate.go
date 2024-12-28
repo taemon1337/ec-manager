@@ -8,9 +8,9 @@ import (
 	"github.com/taemon1337/ec-manager/pkg/ami"
 )
 
-// CheckMigrateCmd represents the check-migrate command
-var CheckMigrateCmd = &cobra.Command{
-	Use:   "check-migrate",
+// checkMigrateCmd represents the migrate subcommand of check
+var checkMigrateCmd = &cobra.Command{
+	Use:   "migrate",
 	Short: "Check instances that need migration",
 	Long:  "Check and list EC2 instances that need to be migrated",
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -42,5 +42,5 @@ var CheckMigrateCmd = &cobra.Command{
 }
 
 func init() {
-	rootCmd.AddCommand(CheckMigrateCmd)
+	checkCmd.AddCommand(checkMigrateCmd)
 }
