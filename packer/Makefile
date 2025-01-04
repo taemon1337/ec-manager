@@ -2,6 +2,8 @@
 
 DOCKER_IMAGE := ec-manager-packer:latest
 AWS_REGION ?= us-east-1
+AWS_ACCESS_KEY_ID ?= $(shell aws configure get aws_access_key_id)
+AWS_SECRET_ACCESS_KEY ?= $(shell aws configure get aws_secret_access_key)
 BUMP_TYPE ?= patch
 
 all: docker-build init rhel9 ubuntu
@@ -37,6 +39,8 @@ rhel9: init
 		-v $(HOME)/.config/packer:/root/.config/packer \
 		-v $(HOME)/.aws:/root/.aws:ro \
 		-e AWS_REGION=$(AWS_REGION) \
+		-e AWS_ACCESS_KEY_ID=$(AWS_ACCESS_KEY_ID) \
+		-e AWS_SECRET_ACCESS_KEY=$(AWS_SECRET_ACCESS_KEY) \
 		$(DOCKER_IMAGE) \
 		build \
 		-var="aws_region=$(AWS_REGION)" \
@@ -49,6 +53,8 @@ ubuntu: init
 		-v $(HOME)/.config/packer:/root/.config/packer \
 		-v $(HOME)/.aws:/root/.aws:ro \
 		-e AWS_REGION=$(AWS_REGION) \
+		-e AWS_ACCESS_KEY_ID=$(AWS_ACCESS_KEY_ID) \
+		-e AWS_SECRET_ACCESS_KEY=$(AWS_SECRET_ACCESS_KEY) \
 		$(DOCKER_IMAGE) \
 		build \
 		-var="aws_region=$(AWS_REGION)" \
