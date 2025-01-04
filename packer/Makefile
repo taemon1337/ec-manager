@@ -2,8 +2,8 @@
 
 DOCKER_IMAGE := ec-manager-packer:latest
 AWS_REGION ?= us-east-1
-AWS_ACCESS_KEY_ID ?= $(shell aws configure get aws_access_key_id)
-AWS_SECRET_ACCESS_KEY ?= $(shell aws configure get aws_secret_access_key)
+AWS_ACCESS_KEY_ID ?= ""
+AWS_SECRET_ACCESS_KEY ?= ""
 BUMP_TYPE ?= patch
 
 all: docker-build init rhel9 ubuntu
