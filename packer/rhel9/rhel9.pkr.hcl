@@ -35,10 +35,11 @@ variable "ssh_username" {
 locals {
   timestamp = formatdate("YYYYMMDDhhmmss", timestamp())
   version   = file("version.txt")
+  clean_version = replace(trimspace(local.version), "[^a-zA-Z0-9._-]", "")  # Remove any invalid characters
 }
 
 source "amazon-ebs" "rhel9" {
-  ami_name      = "${var.ami_name_prefix}-v${local.version}"
+  ami_name      = "${var.ami_name_prefix}-v${local.clean_version}"
   instance_type = var.instance_type
   region        = var.aws_region
   source_ami    = var.source_ami
@@ -75,9 +76,9 @@ build {
   post-processor "shell-local" {
     inline = [
       "echo 'Updating AMI tags...'",
-      "aws ec2 describe-images --filters Name=tag:OS,Values=RHEL9 Name=tag:ami-migrate,Values=latest --query 'Images[?ImageId!=`${build.AmiId}`].ImageId' --output text | tr '\t' '\n' | xargs -I {} aws ec2 create-tags --resources {} --tags Key=ami-migrate,Value=enabled || true",
-      "aws ec2 create-tags --resources ${build.AmiId} --tags Key=ami-migrate,Value=latest",
-      "echo 'AMI ${build.AmiId} is now tagged as latest'"
+      "aws ec2 describe-images --filters Name=tag:OS,Values=RHEL9 Name=tag:ami-migrate,Values=latest --query 'Images[?ImageId!=`${build.ID}`].ImageId' --output text | tr '\t' '\n' | xargs -I {} aws ec2 create-tags --resources {} --tags Key=ami-migrate,Value=enabled || true",
+      "aws ec2 create-tags --resources ${build.ID} --tags Key=ami-migrate,Value=latest",
+      "echo 'AMI ${build.ID} is now tagged as latest'"
     ]
   }
 
