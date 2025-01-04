@@ -27,7 +27,7 @@ var CreateCmd = &cobra.Command{
 	Long:  "Create a new EC2 instance with specified configuration",
 	PreRunE: func(cmd *cobra.Command, args []string) error {
 		if !useLatestAmi && imageID == "" {
-			return fmt.Errorf("either --image or --latest flag must be specified")
+			return fmt.Errorf("either --ami or --latest flag must be specified")
 		}
 		return nil
 	},
@@ -95,11 +95,12 @@ var CreateCmd = &cobra.Command{
 func init() {
 	rootCmd.AddCommand(CreateCmd)
 
-	CreateCmd.Flags().String("key", "", "SSH key name")
-	CreateCmd.Flags().String("subnet", "", "Subnet ID")
-	CreateCmd.Flags().String("ami", "", "AMI ID")
-	CreateCmd.Flags().String("type", "t2.micro", "Instance type")
-	CreateCmd.Flags().String("name", "", "Instance name")
+	CreateCmd.Flags().StringVar(&keyName, "key", "", "SSH key name")
+	CreateCmd.Flags().StringVar(&subnetID, "subnet", "", "Subnet ID")
+	CreateCmd.Flags().StringVar(&imageID, "ami", "", "AMI ID")
+	CreateCmd.Flags().StringVar(&instanceType, "type", "t2.micro", "Instance type")
+	CreateCmd.Flags().StringVar(&userData, "name", "", "Instance name")
+	CreateCmd.Flags().BoolVar(&useLatestAmi, "latest", false, "Use latest AMI with tag ami-migrate=latest")
 
 	if err := CreateCmd.MarkFlagRequired("key"); err != nil {
 		panic(err)

@@ -2,56 +2,52 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/spf13/cobra"
 	"github.com/taemon1337/ec-manager/pkg/client"
 )
 
-// Common flags and variables
 var (
-	// Mock mode flag
-	mockMode bool
-
-	// AWS client
 	awsClient *client.Client
+	mockMode  bool
+	region    string
 )
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
-	Use:   "ecman",
-	Short: "EC2 Manager CLI",
-	Long:  `A CLI tool for managing EC2 instances`,
-	CompletionOptions: cobra.CompletionOptions{
-		DisableDefaultCmd: true,
-	},
+	Use:   "ec-manager",
+	Short: "A CLI tool for managing EC2 instances",
+	Long: `A CLI tool for managing EC2 instances, including:
+- Creating and managing backups
+- Migrating instances to new AMIs
+- Restoring instances from backups`,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		var err error
-		cfg := client.NewDefaultConfig()
-		cfg.MockMode = mockMode
-		awsClient, err = client.NewClient(cfg)
+		awsClient, err = client.NewClient(mockMode, "", region)
 		if err != nil {
 			return fmt.Errorf("failed to create AWS client: %w", err)
 		}
 		return nil
 	},
-	RunE: func(cmd *cobra.Command, args []string) error {
-		if len(args) == 0 {
-			return cmd.Help()
-		}
-		// Find the command
-		c, _, err := cmd.Root().Find(args)
-		if err != nil {
-			return fmt.Errorf("unknown command %q", args[0])
-		}
-		return c.Help()
-	},
+}
+
+// NewRootCmd creates a new root command
+func NewRootCmd() *cobra.Command {
+	return rootCmd
 }
 
 // Execute adds all child commands to the root command and sets flags appropriately.
+// This is called by main.main(). It only needs to happen once to the rootCmd.
 func Execute() error {
-	return rootCmd.Execute()
+	if err := rootCmd.Execute(); err != nil {
+		os.Exit(1)
+		return err
+	}
+	return nil
 }
 
 func init() {
-	rootCmd.PersistentFlags().BoolVar(&mockMode, "mock", false, "Enable mock mode")
+	rootCmd.PersistentFlags().BoolVar(&mockMode, "mock", false, "Use mock mode for testing")
+	rootCmd.PersistentFlags().StringVar(&region, "region", "us-east-1", "AWS region to use")
 }

@@ -6,43 +6,88 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/iam"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/spf13/cobra"
+	"github.com/taemon1337/ec-manager/pkg/types"
 	"gopkg.in/ini.v1"
 )
 
-// STSAPI interface for mocking
-type STSAPI interface {
-	AssumeRole(ctx context.Context, params *sts.AssumeRoleInput, optFns ...func(*sts.Options)) (*sts.AssumeRoleOutput, error)
+// loadConfig loads AWS configuration
+func loadConfig(ctx context.Context) (aws.Config, error) {
+	return config.LoadDefaultConfig(ctx)
 }
 
-// iamAPI interface for mocking
-type iamAPI interface {
-	GetUser(ctx context.Context, params *iam.GetUserInput, optFns ...func(*iam.Options)) (*iam.GetUserOutput, error)
-	ListRoles(ctx context.Context, params *iam.ListRolesInput, optFns ...func(*iam.Options)) (*iam.ListRolesOutput, error)
-}
+// saveCredentials saves AWS credentials to the credentials file
+func saveCredentials(profile, accessKey, secretKey, sessionToken string) error {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("unable to get home directory: %w", err)
+	}
 
-// stsIdentityAPI interface for mocking
-type stsIdentityAPI interface {
-	GetCallerIdentity(ctx context.Context, params *sts.GetCallerIdentityInput, optFns ...func(*sts.Options)) (*sts.GetCallerIdentityOutput, error)
-}
+	awsDir := filepath.Join(homeDir, ".aws")
+	credentialsPath := filepath.Join(awsDir, "credentials")
 
-var (
-	loadConfig   = config.LoadDefaultConfig
-	newSTSClient = func(cfg aws.Config) STSAPI {
-		return sts.NewFromConfig(cfg)
+	// Check if .aws directory exists
+	if mkdirErr := os.MkdirAll(awsDir, 0700); mkdirErr != nil {
+		return fmt.Errorf("failed to create .aws directory: %w", mkdirErr)
 	}
-	newIAMClient = func(cfg aws.Config) iamAPI {
-		return iam.NewFromConfig(cfg)
+
+	// Check if credentials file exists
+	if _, statErr := os.Stat(credentialsPath); statErr == nil {
+		iniFile, err := ini.Load(credentialsPath)
+		if err != nil {
+			return fmt.Errorf("failed to load credentials file: %w", err)
+		}
+
+		profileSection := profile
+		if profileSection == "" {
+			profileSection = "default"
+		}
+
+		section, err := iniFile.NewSection(profileSection)
+		if err != nil {
+			return fmt.Errorf("failed to create profile section: %w", err)
+		}
+
+		section.Key("aws_access_key_id").SetValue(accessKey)
+		section.Key("aws_secret_access_key").SetValue(secretKey)
+		section.Key("aws_session_token").SetValue(sessionToken)
+
+		if err := iniFile.SaveTo(credentialsPath); err != nil {
+			return fmt.Errorf("failed to save credentials file: %w", err)
+		}
+
+		return nil
+	} else {
+		iniFile := ini.Empty()
+
+		profileSection := profile
+		if profileSection == "" {
+			profileSection = "default"
+		}
+
+		section, err := iniFile.NewSection(profileSection)
+		if err != nil {
+			return fmt.Errorf("failed to create profile section: %w", err)
+		}
+
+		section.Key("aws_access_key_id").SetValue(accessKey)
+		section.Key("aws_secret_access_key").SetValue(secretKey)
+		section.Key("aws_session_token").SetValue(sessionToken)
+
+		if err := iniFile.SaveTo(credentialsPath); err != nil {
+			return fmt.Errorf("failed to save credentials file: %w", err)
+		}
+
+		return nil
 	}
-	newSTSIdentityClient = func(cfg aws.Config) stsIdentityAPI {
-		return sts.NewFromConfig(cfg)
-	}
-)
+}
 
 // isCredentialError checks if the error is related to missing or invalid credentials
 func isCredentialError(err error) bool {
@@ -50,277 +95,229 @@ func isCredentialError(err error) bool {
 		return false
 	}
 	errStr := err.Error()
-	credentialErrors := []string{
-		"no EC2 IMDS role found",
-		"get credentials",
-		"failed to refresh cached credentials",
-		"operation error STS: GetCallerIdentity",
-		"InvalidClientTokenId",
-		"ExpiredToken",
-		"AccessDenied",
-	}
-
-	for _, credErr := range credentialErrors {
-		if strings.Contains(errStr, credErr) {
-			return true
-		}
-	}
-	return false
+	return strings.Contains(errStr, "NoCredentialProviders") ||
+		strings.Contains(errStr, "operation error STS: GetCallerIdentity") ||
+		strings.Contains(errStr, "InvalidClientTokenId") ||
+		strings.Contains(errStr, "ExpiredToken") ||
+		strings.Contains(errStr, "AccessDenied") ||
+		strings.Contains(errStr, "InvalidToken")
 }
 
 // getCredentialHelp returns a helpful message for credential setup
 func getCredentialHelp() string {
-	return `
-No valid AWS credentials found. To fix this:
-
-1. Set AWS credentials using environment variables:
+	return `To configure AWS credentials, you can:
+1. Set environment variables:
    export AWS_ACCESS_KEY_ID=your_access_key
    export AWS_SECRET_ACCESS_KEY=your_secret_key
-   export AWS_REGION=your_region (e.g., us-east-1)
+   export AWS_SESSION_TOKEN=your_session_token (optional)
 
-2. Or configure credentials in ~/.aws/credentials:
+2. Use AWS CLI:
+   aws configure
+
+3. Create/edit ~/.aws/credentials file:
    [default]
    aws_access_key_id = your_access_key
    aws_secret_access_key = your_secret_key
-   region = your_region
-
-3. Or if running on EC2, ensure the instance has an IAM role attached
-
-For more information, visit: https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-files.html`
+   aws_session_token = your_session_token (optional)`
 }
 
 // discoverRoleARN attempts to discover available roles for the user
-func discoverRoleARN(ctx context.Context, cfg aws.Config) ([]string, error) {
-	var roleARNs []string
-
-	// Create IAM client
-	iamClient := newIAMClient(cfg)
-
-	// Try to get current user info
-	user, err := iamClient.GetUser(ctx, &iam.GetUserInput{})
-	if err != nil {
-		// Fallback to STS GetCallerIdentity if IAM access is restricted
-		stsIdentityClient := newSTSIdentityClient(cfg)
-		identity, err := stsIdentityClient.GetCallerIdentity(ctx, &sts.GetCallerIdentityInput{})
-		if err != nil {
-			return nil, fmt.Errorf("failed to get caller identity: %w", err)
-		}
-
-		// Extract account ID from identity
-		accountID := *identity.Account
-
-		// List roles (if we have permission)
-		roles, err := iamClient.ListRoles(ctx, &iam.ListRolesInput{})
-		if err == nil {
-			for _, role := range roles.Roles {
-				if role.RoleName != nil && role.Arn != nil {
-					roleARNs = append(roleARNs, *role.Arn)
-				}
-			}
-		}
-
-		if len(roleARNs) == 0 {
-			// If we can't list roles, at least we have the account ID
-			return nil, fmt.Errorf("could not list roles. Your AWS Account ID is: %s\nUse this to construct your role ARN: arn:aws:iam::%s:role/YOUR_ROLE_NAME", accountID, accountID)
-		}
-
-		return roleARNs, nil
-	}
-
-	// We have user info, get account ID from ARN
-	accountID := strings.Split(*user.User.Arn, ":")[4]
+func discoverRoleARN(ctx context.Context, iamClient types.IAMClient) ([]string, error) {
+	var roles []string
 
 	// List roles
-	roles, err := iamClient.ListRoles(ctx, &iam.ListRolesInput{})
+	output, err := iamClient.ListRoles(ctx, &iam.ListRolesInput{})
 	if err != nil {
-		return nil, fmt.Errorf("could not list roles. Your AWS Account ID is: %s\nUse this to construct your role ARN: arn:aws:iam::%s:role/YOUR_ROLE_NAME", accountID, accountID)
+		return nil, fmt.Errorf("failed to list roles: %w", err)
 	}
 
-	// Collect role ARNs
-	for _, role := range roles.Roles {
-		if role.RoleName != nil && role.Arn != nil {
-			roleARNs = append(roleARNs, *role.Arn)
+	for _, role := range output.Roles {
+		if role.AssumeRolePolicyDocument == nil {
+			continue
+		}
+
+		// Check if the role can be assumed by the current user/role
+		if strings.Contains(*role.AssumeRolePolicyDocument, "sts:AssumeRole") {
+			roles = append(roles, *role.Arn)
 		}
 	}
 
-	return roleARNs, nil
+	return roles, nil
 }
 
-var checkCredentialsCmd = &cobra.Command{
-	Use:   "credentials",
-	Short: "Check AWS credentials and optionally assume a role",
-	Long: `Check AWS credentials and optionally assume a role. You can either:
-1. Verify direct credentials (AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY)
-2. Assume an IAM role using --role-arn (optional)
+// ec2ClientWrapper wraps the EC2 client to implement the EC2Client interface
+type ec2ClientWrapper struct {
+	*ec2.Client
+}
 
-The credentials will be stored in ~/.aws/credentials under the specified profile.`,
-	SilenceUsage:  true,
-	SilenceErrors: true,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := cmd.Context()
+// NewInstanceRunningWaiter implements the EC2Client interface
+func (c *ec2ClientWrapper) NewInstanceRunningWaiter() interface {
+	Wait(ctx context.Context, params *ec2.DescribeInstancesInput, maxWaitDur time.Duration, optFns ...func(*ec2.InstanceRunningWaiterOptions)) error
+} {
+	return ec2.NewInstanceRunningWaiter(c.Client)
+}
 
-		// For listing roles, we'll use the default credential chain
-		if listRoles {
-			// If in mock mode, return mock roles
-			if mockMode {
-				fmt.Fprintln(cmd.OutOrStdout(), "Available roles (mock):")
-				fmt.Fprintln(cmd.OutOrStdout(), "- arn:aws:iam::123456789012:role/mock-role-1")
-				fmt.Fprintln(cmd.OutOrStdout(), "- arn:aws:iam::123456789012:role/mock-role-2")
-				return nil
-			}
+// NewInstanceStoppedWaiter implements the EC2Client interface
+func (c *ec2ClientWrapper) NewInstanceStoppedWaiter() interface {
+	Wait(ctx context.Context, params *ec2.DescribeInstancesInput, maxWaitDur time.Duration, optFns ...func(*ec2.InstanceStoppedWaiterOptions)) error
+} {
+	return ec2.NewInstanceStoppedWaiter(c.Client)
+}
 
-			// Use LoadDefaultConfig which will try environment variables, shared credentials, etc.
-			cfg, err := loadConfig(ctx)
-			if err != nil {
-				if isCredentialError(err) {
-					return fmt.Errorf("failed to load AWS credentials\n%s", getCredentialHelp())
-				}
-				return fmt.Errorf("unable to load AWS config: %w", err)
-			}
+// NewInstanceTerminatedWaiter implements the EC2Client interface
+func (c *ec2ClientWrapper) NewInstanceTerminatedWaiter() interface {
+	Wait(ctx context.Context, params *ec2.DescribeInstancesInput, maxWaitDur time.Duration, optFns ...func(*ec2.InstanceTerminatedWaiterOptions)) error
+} {
+	return ec2.NewInstanceTerminatedWaiter(c.Client)
+}
 
-			roles, err := discoverRoleARN(ctx, cfg)
-			if err != nil {
-				if isCredentialError(err) {
-					return fmt.Errorf("failed to list roles: no valid AWS credentials found\n%s", getCredentialHelp())
-				}
-				return fmt.Errorf("failed to list roles: %w\nMake sure you have valid AWS credentials with IAM:ListRoles permission", err)
-			}
-
-			if len(roles) == 0 {
-				return fmt.Errorf("no roles found. Make sure you have valid AWS credentials with IAM:ListRoles permission")
-			}
-
-			fmt.Fprintln(cmd.OutOrStdout(), "Available roles:")
-			for _, role := range roles {
-				fmt.Fprintf(cmd.OutOrStdout(), "- %s\n", role)
-			}
-			return nil
-		}
-
-		// If in mock mode, return success
-		if mockMode {
-			if roleArn != "" {
-				fmt.Fprintf(cmd.OutOrStdout(), "Successfully assumed role %s (mock)\n", roleArn)
-			} else {
-				fmt.Fprintln(cmd.OutOrStdout(), "Successfully verified AWS credentials (mock)")
-			}
-			return nil
-		}
-
-		// Load config for authentication
-		cfg, err := loadConfig(ctx)
-		if err != nil {
-			if isCredentialError(err) {
-				return fmt.Errorf("failed to load AWS credentials\n%s", getCredentialHelp())
-			}
-			return fmt.Errorf("unable to load AWS config: %w", err)
-		}
-
-		// If role ARN is provided, assume the role
-		if roleArn != "" {
-			// Create STS client using the mockable function
-			stsClient := newSTSClient(cfg)
-
-			// Prepare AssumeRole input
-			input := &sts.AssumeRoleInput{
-				RoleArn:         &roleArn,
-				RoleSessionName: &sessionName,
-				DurationSeconds: &duration,
-			}
-
-			// If MFA is provided, add it to the request
-			if mfaSerial != "" && mfaToken != "" {
-				input.SerialNumber = &mfaSerial
-				input.TokenCode = &mfaToken
-			}
-
-			// Call AssumeRole
-			result, err := stsClient.AssumeRole(ctx, input)
-			if err != nil {
-				return fmt.Errorf("failed to assume role: %w", err)
-			}
-
-			// Get AWS credentials file path
-			homeDir, err := os.UserHomeDir()
-			if err != nil {
-				return fmt.Errorf("unable to get home directory: %w", err)
-			}
-			credentialsPath := filepath.Join(homeDir, ".aws", "credentials")
-
-			// Ensure .aws directory exists
-			awsDir := filepath.Dir(credentialsPath)
-			if err := os.MkdirAll(awsDir, 0700); err != nil {
-				return fmt.Errorf("failed to create .aws directory: %w", err)
-			}
-
-			// Load or create credentials file
-			var iniFile *ini.File
-			if _, err := os.Stat(credentialsPath); err == nil {
-				iniFile, err = ini.Load(credentialsPath)
-				if err != nil {
-					return fmt.Errorf("failed to load credentials file: %w", err)
-				}
-			} else {
-				iniFile = ini.Empty()
-			}
-
-			// Create or update profile section
-			profileSection := profile
-			if profileSection == "" {
-				profileSection = "default"
-			}
-			section, err := iniFile.NewSection(profileSection)
-			if err != nil {
-				return fmt.Errorf("failed to create profile section: %w", err)
-			}
-
-			// Set credentials
-			section.Key("aws_access_key_id").SetValue(*result.Credentials.AccessKeyId)
-			section.Key("aws_secret_access_key").SetValue(*result.Credentials.SecretAccessKey)
-			section.Key("aws_session_token").SetValue(*result.Credentials.SessionToken)
-
-			// Save the file
-			if err := iniFile.SaveTo(credentialsPath); err != nil {
-				return fmt.Errorf("failed to save credentials file: %w", err)
-			}
-
-			fmt.Fprintf(cmd.OutOrStdout(), "Successfully assumed role %s and saved credentials to profile %s\n", roleArn, profileSection)
-			return nil
-		} else {
-			// Verify we can make AWS calls with the current credentials
-			stsClient := newSTSIdentityClient(cfg)
-			_, err := stsClient.GetCallerIdentity(ctx, &sts.GetCallerIdentityInput{})
-			if err != nil {
-				if isCredentialError(err) {
-					return fmt.Errorf("failed to verify AWS credentials\n%s", getCredentialHelp())
-				}
-				return fmt.Errorf("failed to verify AWS credentials: %w", err)
-			}
-
-			fmt.Fprintln(cmd.OutOrStdout(), "Successfully verified AWS credentials")
-			return nil
-		}
-	},
+// NewVolumeAvailableWaiter implements the EC2Client interface
+func (c *ec2ClientWrapper) NewVolumeAvailableWaiter() interface {
+	Wait(ctx context.Context, params *ec2.DescribeVolumesInput, maxWaitDur time.Duration, optFns ...func(*ec2.VolumeAvailableWaiterOptions)) error
+} {
+	return ec2.NewVolumeAvailableWaiter(c.Client)
 }
 
 var (
-	profile     string
-	roleArn     string
-	mfaSerial   string
-	mfaToken    string
-	duration    int32
-	sessionName string
-	listRoles   bool
+	checkCredentialsCmd = &cobra.Command{
+		Use:   "credentials",
+		Short: "Check AWS credentials and optionally assume a role",
+		Long: `Check AWS credentials and optionally assume a role. You can either:
+1. Use existing credentials
+2. Assume a role (with optional MFA)
+3. Discover available roles that you can assume
+
+The credentials will be stored in ~/.aws/credentials under the specified profile.`,
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := cmd.Context()
+
+			// Load AWS configuration
+			cfg, err := loadConfig(ctx)
+			if err != nil {
+				if isCredentialError(err) {
+					fmt.Println("No valid AWS credentials found.")
+					fmt.Println(getCredentialHelp())
+					return err
+				}
+				return fmt.Errorf("failed to load AWS config: %w", err)
+			}
+
+			// Get EC2 client from context
+			ec2Client, ok := ctx.Value(types.EC2ClientKey).(types.EC2Client)
+			if !ok {
+				ec2Client = &ec2ClientWrapper{ec2.NewFromConfig(cfg)}
+			}
+
+			// Get STS client from context
+			stsClient, ok := ctx.Value(types.STSClientKey).(types.STSClient)
+			if !ok {
+				stsClient = sts.NewFromConfig(cfg)
+			}
+
+			// Get IAM client from context
+			iamClient, ok := ctx.Value(types.IAMClientKey).(types.IAMClient)
+			if !ok {
+				iamClient = iam.NewFromConfig(cfg)
+			}
+
+			// Check EC2 access
+			_, ec2Err := ec2Client.DescribeInstances(ctx, &ec2.DescribeInstancesInput{})
+
+			// Check current credentials
+			callerIdentity, stsErr := stsClient.GetCallerIdentity(ctx, &sts.GetCallerIdentityInput{})
+
+			// Check IAM access
+			_, iamErr := iamClient.ListUsers(ctx, &iam.ListUsersInput{})
+
+			// Handle errors
+			if ec2Err != nil {
+				return fmt.Errorf("failed to check EC2 access: %w", ec2Err)
+			}
+			if stsErr != nil {
+				if isCredentialError(stsErr) {
+					fmt.Println("No valid AWS credentials found.")
+					fmt.Println(getCredentialHelp())
+					return stsErr
+				}
+				return fmt.Errorf("failed to check STS access: %w", stsErr)
+			}
+			if iamErr != nil {
+				return fmt.Errorf("failed to check IAM access: %w", iamErr)
+			}
+
+			fmt.Printf("Current identity: %s\n", *callerIdentity.Arn)
+
+			// If discover flag is set, try to find available roles
+			if discover {
+				roles, err := discoverRoleARN(ctx, iamClient)
+				if err != nil {
+					return fmt.Errorf("failed to discover roles: %w", err)
+				}
+
+				if len(roles) == 0 {
+					fmt.Println("No assumable roles found")
+					return nil
+				}
+
+				fmt.Println("\nAvailable roles:")
+				for _, role := range roles {
+					fmt.Printf("- %s\n", role)
+				}
+				return nil
+			}
+
+			// If roleARN is provided, attempt to assume the role
+			if roleARN != "" {
+				input := &sts.AssumeRoleInput{
+					RoleArn:         aws.String(roleARN),
+					RoleSessionName: aws.String("ec-manager-session"),
+				}
+
+				if mfaToken != "" {
+					input.SerialNumber = aws.String(mfaSerial)
+					input.TokenCode = aws.String(mfaToken)
+				}
+
+				assumeRoleOutput, err := stsClient.AssumeRole(ctx, input)
+				if err != nil {
+					return fmt.Errorf("failed to assume role: %w", err)
+				}
+
+				// Save the temporary credentials
+				err = saveCredentials(profile,
+					*assumeRoleOutput.Credentials.AccessKeyId,
+					*assumeRoleOutput.Credentials.SecretAccessKey,
+					*assumeRoleOutput.Credentials.SessionToken)
+				if err != nil {
+					return fmt.Errorf("failed to save credentials: %w", err)
+				}
+
+				fmt.Printf("Successfully assumed role %s\n", roleARN)
+				fmt.Printf("Temporary credentials saved to profile: %s\n", profile)
+			}
+
+			return nil
+		},
+	}
+
+	roleARN   string
+	mfaSerial string
+	mfaToken  string
+	profile   string
+	discover  bool
 )
 
-func init() {
-	checkCmd.AddCommand(checkCredentialsCmd)
+// NewCheckCredentialsCmd creates a new check credentials command
+func NewCheckCredentialsCmd() *cobra.Command {
+	return checkCredentialsCmd
+}
 
-	checkCredentialsCmd.Flags().StringVar(&profile, "profile", "", "AWS profile to save credentials to")
-	checkCredentialsCmd.Flags().StringVar(&roleArn, "role-arn", "", "ARN of the role to assume")
-	checkCredentialsCmd.Flags().StringVar(&mfaSerial, "mfa-serial", "", "Serial number of the MFA device")
-	checkCredentialsCmd.Flags().StringVar(&mfaToken, "mfa-token", "", "Token from the MFA device")
-	checkCredentialsCmd.Flags().Int32Var(&duration, "duration", 3600, "Duration in seconds for the assumed role session")
-	checkCredentialsCmd.Flags().StringVar(&sessionName, "session-name", "ec-manager", "Name for the assumed role session")
-	checkCredentialsCmd.Flags().BoolVar(&listRoles, "list-roles", false, "List available roles")
+func init() {
+	checkCredentialsCmd.Flags().StringVarP(&roleARN, "role", "r", "", "Role ARN to assume")
+	checkCredentialsCmd.Flags().StringVarP(&mfaSerial, "mfa-serial", "s", "", "MFA device serial number")
+	checkCredentialsCmd.Flags().StringVarP(&mfaToken, "mfa-token", "t", "", "MFA token code")
+	checkCredentialsCmd.Flags().StringVarP(&profile, "profile", "p", "default", "AWS profile to save credentials to")
+	checkCredentialsCmd.Flags().BoolVarP(&discover, "discover", "d", false, "Discover available roles")
 }

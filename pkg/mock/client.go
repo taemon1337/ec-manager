@@ -2,11 +2,17 @@ package mock
 
 import (
 	"context"
+	"testing"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
+	"github.com/aws/aws-sdk-go-v2/service/iam"
+	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/stretchr/testify/mock"
+	"github.com/taemon1337/ec-manager/pkg/mock/fixtures"
+	"github.com/taemon1337/ec-manager/pkg/mock/waiters"
 )
 
 var Anything = mock.Anything
@@ -14,464 +20,369 @@ var MatchedBy = mock.MatchedBy
 
 // EC2ClientKey is the key used to store the EC2 client in context
 type ec2ClientKey struct{}
+
 var EC2ClientKey = ec2ClientKey{}
 
+// STSClientKey is the key used to store the STS client in context
+type stsClientKey struct{}
+
+var STSClientKey = stsClientKey{}
+
+// IAMClientKey is the key used to store the IAM client in context
+type iamClientKey struct{}
+
+var IAMClientKey = iamClientKey{}
+
+// MockEC2Client is a mock implementation of the EC2Client interface
 type MockEC2Client struct {
 	mock.Mock
-
-	// Outputs (for backward compatibility)
-	DescribeInstancesOutput  *ec2.DescribeInstancesOutput
-	StopInstancesOutput      *ec2.StopInstancesOutput
-	StartInstancesOutput     *ec2.StartInstancesOutput
-	CreateImageOutput        *ec2.CreateImageOutput
-	DescribeImagesOutput     *ec2.DescribeImagesOutput
-	CreateTagsOutput         *ec2.CreateTagsOutput
-	RunInstancesOutput       *ec2.RunInstancesOutput
-	TerminateInstancesOutput *ec2.TerminateInstancesOutput
-	AttachVolumeOutput       *ec2.AttachVolumeOutput
-	CreateSnapshotOutput     *ec2.CreateSnapshotOutput
-	CreateVolumeOutput       *ec2.CreateVolumeOutput
-	DescribeSnapshotsOutput  *ec2.DescribeSnapshotsOutput
-	DescribeVolumesOutput    *ec2.DescribeVolumesOutput
-	DescribeSubnetsOutput    *ec2.DescribeSubnetsOutput
-	DescribeKeyPairsOutput   *ec2.DescribeKeyPairsOutput
-
-	// Functions (for backward compatibility)
-	DescribeInstancesFunc    func(context.Context, *ec2.DescribeInstancesInput, ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error)
-	StopInstancesFunc        func(context.Context, *ec2.StopInstancesInput, ...func(*ec2.Options)) (*ec2.StopInstancesOutput, error)
-	StartInstancesFunc       func(context.Context, *ec2.StartInstancesInput, ...func(*ec2.Options)) (*ec2.StartInstancesOutput, error)
-	CreateImageFunc          func(context.Context, *ec2.CreateImageInput, ...func(*ec2.Options)) (*ec2.CreateImageOutput, error)
-	DescribeImagesFunc       func(context.Context, *ec2.DescribeImagesInput, ...func(*ec2.Options)) (*ec2.DescribeImagesOutput, error)
-	CreateTagsFunc           func(context.Context, *ec2.CreateTagsInput, ...func(*ec2.Options)) (*ec2.CreateTagsOutput, error)
-	RunInstancesFunc         func(context.Context, *ec2.RunInstancesInput, ...func(*ec2.Options)) (*ec2.RunInstancesOutput, error)
-	TerminateInstancesFunc   func(context.Context, *ec2.TerminateInstancesInput, ...func(*ec2.Options)) (*ec2.TerminateInstancesOutput, error)
-	AttachVolumeFunc         func(context.Context, *ec2.AttachVolumeInput, ...func(*ec2.Options)) (*ec2.AttachVolumeOutput, error)
-	CreateSnapshotFunc       func(context.Context, *ec2.CreateSnapshotInput, ...func(*ec2.Options)) (*ec2.CreateSnapshotOutput, error)
-	CreateVolumeFunc         func(context.Context, *ec2.CreateVolumeInput, ...func(*ec2.Options)) (*ec2.CreateVolumeOutput, error)
-	DescribeSnapshotsFunc    func(context.Context, *ec2.DescribeSnapshotsInput, ...func(*ec2.Options)) (*ec2.DescribeSnapshotsOutput, error)
-	DescribeVolumesFunc      func(context.Context, *ec2.DescribeVolumesInput, ...func(*ec2.Options)) (*ec2.DescribeVolumesOutput, error)
-	DescribeSubnetsFunc      func(context.Context, *ec2.DescribeSubnetsInput, ...func(*ec2.Options)) (*ec2.DescribeSubnetsOutput, error)
-	DescribeKeyPairsFunc     func(context.Context, *ec2.DescribeKeyPairsInput, ...func(*ec2.Options)) (*ec2.DescribeKeyPairsOutput, error)
+	InstanceStoppedWaiter *waiters.MockInstanceStoppedWaiter
+	InstanceRunningWaiter *waiters.MockInstanceRunningWaiter
+	VolumeAvailableWaiter *waiters.MockVolumeAvailableWaiter
 }
 
-func NewMockEC2Client() *MockEC2Client {
-	return &MockEC2Client{
-		DescribeInstancesOutput: &ec2.DescribeInstancesOutput{
-			Reservations: []types.Reservation{
-				{
-					Instances: []types.Instance{
-						{
-							InstanceId:   aws.String("i-123"),
-							InstanceType: types.InstanceTypeT2Micro,
-							KeyName:      aws.String("test-key"),
-							SubnetId:     aws.String("subnet-123"),
-							State: &types.InstanceState{
-								Name: types.InstanceStateNameRunning,
-							},
-							Placement: &types.Placement{
-								AvailabilityZone: aws.String("us-west-2a"),
-							},
-							Tags: []types.Tag{
-								{
-									Key:   aws.String("ami-migrate"),
-									Value: aws.String("enabled"),
-								},
-							},
-						},
-					},
-				},
-			},
-		},
-		StopInstancesOutput: &ec2.StopInstancesOutput{
-			StoppingInstances: []types.InstanceStateChange{
-				{
-					CurrentState: &types.InstanceState{
-						Name: types.InstanceStateNameStopped,
-					},
-					InstanceId: aws.String("i-123"),
-				},
-			},
-		},
-		StartInstancesOutput: &ec2.StartInstancesOutput{
-			StartingInstances: []types.InstanceStateChange{
-				{
-					CurrentState: &types.InstanceState{
-						Name: types.InstanceStateNameRunning,
-					},
-					InstanceId: aws.String("i-123"),
-				},
-			},
-		},
-		CreateImageOutput: &ec2.CreateImageOutput{
-			ImageId: aws.String("ami-123"),
-		},
-		DescribeImagesOutput: &ec2.DescribeImagesOutput{
-			Images: []types.Image{
-				{
-					ImageId:      aws.String("ami-123"),
-					Name:        aws.String("test-ami"),
-					Description: aws.String("Test AMI"),
-					State:      types.ImageStateAvailable,
-					CreationDate: aws.String("2024-12-24T00:00:00Z"),
-					Tags: []types.Tag{
-						{
-							Key:   aws.String("ami-migrate"),
-							Value: aws.String("latest"),
-						},
-						{
-							Key:   aws.String("Project"),
-							Value: aws.String("ec-manager"),
-						},
-					},
-				},
-			},
-		},
-		CreateTagsOutput: &ec2.CreateTagsOutput{},
-		RunInstancesOutput: &ec2.RunInstancesOutput{
-			Instances: []types.Instance{
-				{
-					InstanceId: aws.String("i-123"),
-					State: &types.InstanceState{
-						Name: types.InstanceStateNamePending,
-					},
-				},
-			},
-		},
-		TerminateInstancesOutput: &ec2.TerminateInstancesOutput{
-			TerminatingInstances: []types.InstanceStateChange{
-				{
-					CurrentState: &types.InstanceState{
-						Name: types.InstanceStateNameShuttingDown,
-					},
-					InstanceId: aws.String("i-123"),
-				},
-			},
-		},
-		AttachVolumeOutput: &ec2.AttachVolumeOutput{
-			Device:     aws.String("/dev/sda1"),
-			InstanceId: aws.String("i-123"),
-			VolumeId:   aws.String("vol-123"),
-			State:      types.VolumeAttachmentStateAttached,
-		},
-		CreateSnapshotOutput: &ec2.CreateSnapshotOutput{
-			SnapshotId: aws.String("snap-123"),
-		},
-		CreateVolumeOutput: &ec2.CreateVolumeOutput{
-			VolumeId: aws.String("vol-123"),
-		},
-		DescribeSnapshotsOutput: &ec2.DescribeSnapshotsOutput{
-			Snapshots: []types.Snapshot{
-				{
-					SnapshotId: aws.String("snap-123"),
-					State:      types.SnapshotStateCompleted,
-				},
-			},
-		},
-		DescribeVolumesOutput: &ec2.DescribeVolumesOutput{
-			Volumes: []types.Volume{
-				{
-					VolumeId: aws.String("vol-123"),
-					State:    types.VolumeStateAvailable,
-				},
-			},
-		},
-		DescribeSubnetsOutput: &ec2.DescribeSubnetsOutput{
-			Subnets: []types.Subnet{
-				{
-					SubnetId:     aws.String("subnet-123"),
-					VpcId:        aws.String("vpc-123"),
-					CidrBlock:    aws.String("172.31.0.0/20"),
-					AvailabilityZone: aws.String("us-west-2a"),
-					AvailableIpAddressCount: aws.Int32(4091),
-					Tags: []types.Tag{
-						{
-							Key:   aws.String("Name"),
-							Value: aws.String("Main Subnet"),
-						},
-					},
-				},
-			},
-		},
-		DescribeKeyPairsOutput: &ec2.DescribeKeyPairsOutput{
-			KeyPairs: []types.KeyPairInfo{
-				{
-					KeyName:        aws.String("test-key"),
-					KeyFingerprint: aws.String("12:34:56:78:90:ab:cd:ef"),
-					Tags: []types.Tag{
-						{
-							Key:   aws.String("Project"),
-							Value: aws.String("ec-manager"),
-						},
-					},
-				},
-			},
-		},
-	}
+// NewMockEC2Client creates a new mock EC2 client
+func NewMockEC2Client(t *testing.T) *MockEC2Client {
+	m := &MockEC2Client{}
+	m.Test(t)
+	return m
+}
+
+// NewMockEC2ClientWithoutT creates a new mock EC2 client without requiring a testing.T
+func NewMockEC2ClientWithoutT() *MockEC2Client {
+	return &MockEC2Client{}
 }
 
 // ExpectDescribeInstances sets up expectations for DescribeInstances
-func (m *MockEC2Client) ExpectDescribeInstances(instanceID string, instance types.Instance, err error) {
-	m.On("DescribeInstances", mock.Anything, &ec2.DescribeInstancesInput{
-		InstanceIds: []string{instanceID},
-	}).Return(&ec2.DescribeInstancesOutput{
+func (m *MockEC2Client) ExpectDescribeInstances(instanceIDs []string, instances []types.Instance) *mock.Call {
+	input := &ec2.DescribeInstancesInput{}
+	if len(instanceIDs) > 0 {
+		input.InstanceIds = instanceIDs
+	}
+
+	return m.On("DescribeInstances", mock.Anything, input).Return(&ec2.DescribeInstancesOutput{
 		Reservations: []types.Reservation{
 			{
-				Instances: []types.Instance{instance},
+				Instances: instances,
 			},
 		},
-	}, err)
+	}, nil)
 }
 
 // ExpectDescribeImages sets up expectations for DescribeImages
-func (m *MockEC2Client) ExpectDescribeImages(imageID string, image types.Image, err error) {
-	m.On("DescribeImages", mock.Anything, &ec2.DescribeImagesInput{
-		ImageIds: []string{imageID},
-	}).Return(&ec2.DescribeImagesOutput{
-		Images: []types.Image{image},
-	}, err)
-}
-
-// ExpectCreateImage sets up expectations for CreateImage
-func (m *MockEC2Client) ExpectCreateImage(instanceID string, name string, imageID string, err error) {
-	m.On("CreateImage", mock.Anything, &ec2.CreateImageInput{
-		InstanceId:  aws.String(instanceID),
-		Name:        aws.String(name),
-		Description: aws.String("Backup of instance " + instanceID),
-	}).Return(&ec2.CreateImageOutput{
-		ImageId: aws.String(imageID),
-	}, err)
-}
-
-// ExpectCreateTags sets up expectations for CreateTags
-func (m *MockEC2Client) ExpectCreateTags(resourceID string, tags []types.Tag, err error) {
-	m.On("CreateTags", mock.Anything, &ec2.CreateTagsInput{
-		Resources: []string{resourceID},
-		Tags:      tags,
-	}).Return(&ec2.CreateTagsOutput{}, err)
-}
-
-// ExpectRunInstances sets up expectations for RunInstances
-func (m *MockEC2Client) ExpectRunInstances(imageID string, instanceType types.InstanceType, instanceID string, err error) {
-	m.On("RunInstances", mock.Anything, &ec2.RunInstancesInput{
-		ImageId:      aws.String(imageID),
-		InstanceType: instanceType,
-		MinCount:     aws.Int32(1),
-		MaxCount:     aws.Int32(1),
-	}).Return(&ec2.RunInstancesOutput{
-		Instances: []types.Instance{
-			{
-				InstanceId: aws.String(instanceID),
-			},
-		},
-	}, err)
-}
-
-// DescribeInstances implements the EC2 client interface
-func (m *MockEC2Client) DescribeInstances(ctx context.Context, params *ec2.DescribeInstancesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
-	args := m.Called(ctx, params)
-	if args.Get(0) != nil {
-		return args.Get(0).(*ec2.DescribeInstancesOutput), args.Error(1)
+func (m *MockEC2Client) ExpectDescribeImages(imageIDs []string, images []types.Image) *mock.Call {
+	input := &ec2.DescribeImagesInput{}
+	if len(imageIDs) > 0 {
+		input.ImageIds = imageIDs
 	}
-	
-	if m.DescribeInstancesFunc != nil {
-		return m.DescribeInstancesFunc(ctx, params, optFns...)
+
+	return m.On("DescribeImages", mock.Anything, input).Return(&ec2.DescribeImagesOutput{
+		Images: images,
+	}, nil)
+}
+
+// ExpectDescribeSubnets sets up expectations for DescribeSubnets
+func (m *MockEC2Client) ExpectDescribeSubnets(subnetIDs []string, subnets []types.Subnet) *mock.Call {
+	input := &ec2.DescribeSubnetsInput{}
+	if len(subnetIDs) > 0 {
+		input.SubnetIds = subnetIDs
 	}
-	
-	return m.DescribeInstancesOutput, nil
+
+	return m.On("DescribeSubnets", mock.Anything, input).Return(&ec2.DescribeSubnetsOutput{
+		Subnets: subnets,
+	}, nil)
 }
 
 // DescribeImages implements the EC2 client interface
 func (m *MockEC2Client) DescribeImages(ctx context.Context, params *ec2.DescribeImagesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeImagesOutput, error) {
 	args := m.Called(ctx, params)
-	if args.Get(0) != nil {
-		return args.Get(0).(*ec2.DescribeImagesOutput), args.Error(1)
+	if args.Get(1) != nil {
+		return nil, args.Get(1).(error)
 	}
-	
-	if m.DescribeImagesFunc != nil {
-		return m.DescribeImagesFunc(ctx, params, optFns...)
+
+	if len(params.ImageIds) > 0 {
+		// Specific AMI lookup
+		return args.Get(0).(*ec2.DescribeImagesOutput), nil
 	}
-	
-	return m.DescribeImagesOutput, nil
+
+	// List operation
+	return &ec2.DescribeImagesOutput{
+		Images: fixtures.TestListAMIs(),
+	}, nil
 }
 
-// CreateImage implements the EC2 client interface
-func (m *MockEC2Client) CreateImage(ctx context.Context, params *ec2.CreateImageInput, optFns ...func(*ec2.Options)) (*ec2.CreateImageOutput, error) {
+// DescribeInstances implements the EC2 client interface
+func (m *MockEC2Client) DescribeInstances(ctx context.Context, params *ec2.DescribeInstancesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
 	args := m.Called(ctx, params)
-	if args.Get(0) != nil {
-		return args.Get(0).(*ec2.CreateImageOutput), args.Error(1)
+	if args.Get(1) != nil {
+		return nil, args.Get(1).(error)
 	}
-	
-	if m.CreateImageFunc != nil {
-		return m.CreateImageFunc(ctx, params, optFns...)
-	}
-	
-	return m.CreateImageOutput, nil
-}
 
-// CreateTags implements the EC2 client interface
-func (m *MockEC2Client) CreateTags(ctx context.Context, params *ec2.CreateTagsInput, optFns ...func(*ec2.Options)) (*ec2.CreateTagsOutput, error) {
-	args := m.Called(ctx, params)
-	if args.Get(0) != nil {
-		return args.Get(0).(*ec2.CreateTagsOutput), args.Error(1)
+	if len(params.InstanceIds) > 0 {
+		// Specific instance lookup
+		return args.Get(0).(*ec2.DescribeInstancesOutput), nil
 	}
-	
-	if m.CreateTagsFunc != nil {
-		return m.CreateTagsFunc(ctx, params, optFns...)
-	}
-	
-	return m.CreateTagsOutput, nil
-}
 
-// RunInstances implements the EC2 client interface
-func (m *MockEC2Client) RunInstances(ctx context.Context, params *ec2.RunInstancesInput, optFns ...func(*ec2.Options)) (*ec2.RunInstancesOutput, error) {
-	args := m.Called(ctx, params)
-	if args.Get(0) != nil {
-		return args.Get(0).(*ec2.RunInstancesOutput), args.Error(1)
-	}
-	
-	if m.RunInstancesFunc != nil {
-		return m.RunInstancesFunc(ctx, params, optFns...)
-	}
-	
-	return m.RunInstancesOutput, nil
-}
-
-// TerminateInstances implements the EC2 client interface
-func (m *MockEC2Client) TerminateInstances(ctx context.Context, params *ec2.TerminateInstancesInput, optFns ...func(*ec2.Options)) (*ec2.TerminateInstancesOutput, error) {
-	args := m.Called(ctx, params)
-	if args.Get(0) != nil {
-		return args.Get(0).(*ec2.TerminateInstancesOutput), args.Error(1)
-	}
-	
-	if m.TerminateInstancesFunc != nil {
-		return m.TerminateInstancesFunc(ctx, params, optFns...)
-	}
-	
-	return m.TerminateInstancesOutput, nil
-}
-
-// AttachVolume implements the EC2 client interface
-func (m *MockEC2Client) AttachVolume(ctx context.Context, params *ec2.AttachVolumeInput, optFns ...func(*ec2.Options)) (*ec2.AttachVolumeOutput, error) {
-	args := m.Called(ctx, params)
-	if args.Get(0) != nil {
-		return args.Get(0).(*ec2.AttachVolumeOutput), args.Error(1)
-	}
-	
-	if m.AttachVolumeFunc != nil {
-		return m.AttachVolumeFunc(ctx, params, optFns...)
-	}
-	
-	return m.AttachVolumeOutput, nil
-}
-
-// CreateSnapshot implements the EC2 client interface
-func (m *MockEC2Client) CreateSnapshot(ctx context.Context, params *ec2.CreateSnapshotInput, optFns ...func(*ec2.Options)) (*ec2.CreateSnapshotOutput, error) {
-	args := m.Called(ctx, params)
-	if args.Get(0) != nil {
-		return args.Get(0).(*ec2.CreateSnapshotOutput), args.Error(1)
-	}
-	
-	if m.CreateSnapshotFunc != nil {
-		return m.CreateSnapshotFunc(ctx, params, optFns...)
-	}
-	
-	return m.CreateSnapshotOutput, nil
-}
-
-// CreateVolume implements the EC2 client interface
-func (m *MockEC2Client) CreateVolume(ctx context.Context, params *ec2.CreateVolumeInput, optFns ...func(*ec2.Options)) (*ec2.CreateVolumeOutput, error) {
-	args := m.Called(ctx, params)
-	if args.Get(0) != nil {
-		return args.Get(0).(*ec2.CreateVolumeOutput), args.Error(1)
-	}
-	
-	if m.CreateVolumeFunc != nil {
-		return m.CreateVolumeFunc(ctx, params, optFns...)
-	}
-	
-	return m.CreateVolumeOutput, nil
-}
-
-// DescribeSnapshots implements the EC2 client interface
-func (m *MockEC2Client) DescribeSnapshots(ctx context.Context, params *ec2.DescribeSnapshotsInput, optFns ...func(*ec2.Options)) (*ec2.DescribeSnapshotsOutput, error) {
-	args := m.Called(ctx, params)
-	if args.Get(0) != nil {
-		return args.Get(0).(*ec2.DescribeSnapshotsOutput), args.Error(1)
-	}
-	
-	if m.DescribeSnapshotsFunc != nil {
-		return m.DescribeSnapshotsFunc(ctx, params, optFns...)
-	}
-	
-	return m.DescribeSnapshotsOutput, nil
-}
-
-// DescribeVolumes implements the EC2 client interface
-func (m *MockEC2Client) DescribeVolumes(ctx context.Context, params *ec2.DescribeVolumesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeVolumesOutput, error) {
-	args := m.Called(ctx, params)
-	if args.Get(0) != nil {
-		return args.Get(0).(*ec2.DescribeVolumesOutput), args.Error(1)
-	}
-	
-	if m.DescribeVolumesFunc != nil {
-		return m.DescribeVolumesFunc(ctx, params, optFns...)
-	}
-	
-	return m.DescribeVolumesOutput, nil
+	// List operation
+	instances := fixtures.TestListInstances()
+	return &ec2.DescribeInstancesOutput{
+		Reservations: []types.Reservation{
+			{
+				Instances: instances,
+			},
+		},
+	}, nil
 }
 
 // DescribeSubnets implements the EC2 client interface
 func (m *MockEC2Client) DescribeSubnets(ctx context.Context, params *ec2.DescribeSubnetsInput, optFns ...func(*ec2.Options)) (*ec2.DescribeSubnetsOutput, error) {
 	args := m.Called(ctx, params)
-	if args.Get(0) != nil {
-		return args.Get(0).(*ec2.DescribeSubnetsOutput), args.Error(1)
+	if args.Get(1) != nil {
+		return nil, args.Get(1).(error)
 	}
-	
-	if m.DescribeSubnetsFunc != nil {
-		return m.DescribeSubnetsFunc(ctx, params, optFns...)
+
+	if len(params.SubnetIds) > 0 {
+		// Specific subnet lookup
+		return args.Get(0).(*ec2.DescribeSubnetsOutput), nil
 	}
-	
-	return m.DescribeSubnetsOutput, nil
+
+	// List operation
+	return &ec2.DescribeSubnetsOutput{
+		Subnets: fixtures.TestListSubnets(),
+	}, nil
 }
 
 // DescribeKeyPairs implements the EC2 client interface
 func (m *MockEC2Client) DescribeKeyPairs(ctx context.Context, params *ec2.DescribeKeyPairsInput, optFns ...func(*ec2.Options)) (*ec2.DescribeKeyPairsOutput, error) {
 	args := m.Called(ctx, params)
-	if args.Get(0) != nil {
-		return args.Get(0).(*ec2.DescribeKeyPairsOutput), args.Error(1)
+	if args.Get(1) != nil {
+		return nil, args.Get(1).(error)
 	}
-	
-	if m.DescribeKeyPairsFunc != nil {
-		return m.DescribeKeyPairsFunc(ctx, params, optFns...)
+
+	if len(params.KeyNames) > 0 {
+		// Specific key pair lookup
+		return args.Get(0).(*ec2.DescribeKeyPairsOutput), nil
 	}
-	
-	return m.DescribeKeyPairsOutput, nil
+
+	// List operation
+	return &ec2.DescribeKeyPairsOutput{
+		KeyPairs: fixtures.TestListKeyPairs(),
+	}, nil
+}
+
+// CreateImage implements the EC2 client interface
+func (m *MockEC2Client) CreateImage(ctx context.Context, params *ec2.CreateImageInput, optFns ...func(*ec2.Options)) (*ec2.CreateImageOutput, error) {
+	args := m.Called(ctx, params)
+	if args.Get(1) != nil {
+		return nil, args.Get(1).(error)
+	}
+	return args.Get(0).(*ec2.CreateImageOutput), nil
+}
+
+// CreateTags implements the EC2 client interface
+func (m *MockEC2Client) CreateTags(ctx context.Context, params *ec2.CreateTagsInput, optFns ...func(*ec2.Options)) (*ec2.CreateTagsOutput, error) {
+	args := m.Called(ctx, params, mock.Anything)
+	if args.Get(1) != nil {
+		return nil, args.Get(1).(error)
+	}
+	return args.Get(0).(*ec2.CreateTagsOutput), nil
+}
+
+// RunInstances implements the EC2 client interface
+func (m *MockEC2Client) RunInstances(ctx context.Context, params *ec2.RunInstancesInput, optFns ...func(*ec2.Options)) (*ec2.RunInstancesOutput, error) {
+	args := m.Called(ctx, params, optFns)
+	if args.Get(1) != nil {
+		return nil, args.Get(1).(error)
+	}
+
+	// Mock instance creation
+	return &ec2.RunInstancesOutput{
+		Instances: []types.Instance{
+			{
+				InstanceId: aws.String("i-mock123"),
+				State: &types.InstanceState{
+					Name: types.InstanceStateNameRunning,
+				},
+				InstanceType: types.InstanceTypeT2Micro,
+			},
+		},
+	}, nil
+}
+
+// TerminateInstances implements the EC2 client interface
+func (m *MockEC2Client) TerminateInstances(ctx context.Context, params *ec2.TerminateInstancesInput, optFns ...func(*ec2.Options)) (*ec2.TerminateInstancesOutput, error) {
+	args := m.Called(ctx, params)
+	if args.Get(1) != nil {
+		return nil, args.Get(1).(error)
+	}
+	return args.Get(0).(*ec2.TerminateInstancesOutput), nil
+}
+
+// AttachVolume implements the EC2 client interface
+func (m *MockEC2Client) AttachVolume(ctx context.Context, params *ec2.AttachVolumeInput, optFns ...func(*ec2.Options)) (*ec2.AttachVolumeOutput, error) {
+	args := m.Called(ctx, params, optFns)
+	if args.Get(1) != nil {
+		return nil, args.Get(1).(error)
+	}
+	return args.Get(0).(*ec2.AttachVolumeOutput), nil
+}
+
+// CreateSnapshot implements the EC2 client interface
+func (m *MockEC2Client) CreateSnapshot(ctx context.Context, params *ec2.CreateSnapshotInput, optFns ...func(*ec2.Options)) (*ec2.CreateSnapshotOutput, error) {
+	args := m.Called(ctx, params)
+	if args.Get(1) != nil {
+		return nil, args.Get(1).(error)
+	}
+	return args.Get(0).(*ec2.CreateSnapshotOutput), nil
+}
+
+// CreateVolume implements the EC2 client interface
+func (m *MockEC2Client) CreateVolume(ctx context.Context, params *ec2.CreateVolumeInput, optFns ...func(*ec2.Options)) (*ec2.CreateVolumeOutput, error) {
+	args := m.Called(ctx, params)
+	if args.Get(1) != nil {
+		return nil, args.Get(1).(error)
+	}
+	return args.Get(0).(*ec2.CreateVolumeOutput), nil
+}
+
+// DescribeSnapshots implements the EC2 client interface
+func (m *MockEC2Client) DescribeSnapshots(ctx context.Context, params *ec2.DescribeSnapshotsInput, optFns ...func(*ec2.Options)) (*ec2.DescribeSnapshotsOutput, error) {
+	args := m.Called(ctx, params)
+	if args.Get(1) != nil {
+		return nil, args.Get(1).(error)
+	}
+	return args.Get(0).(*ec2.DescribeSnapshotsOutput), nil
+}
+
+// DescribeVolumes implements the EC2 client interface
+func (m *MockEC2Client) DescribeVolumes(ctx context.Context, params *ec2.DescribeVolumesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeVolumesOutput, error) {
+	args := m.Called(ctx, params)
+	if args.Get(1) != nil {
+		return nil, args.Get(1).(error)
+	}
+	return args.Get(0).(*ec2.DescribeVolumesOutput), nil
 }
 
 // StopInstances implements the EC2 client interface
 func (m *MockEC2Client) StopInstances(ctx context.Context, params *ec2.StopInstancesInput, optFns ...func(*ec2.Options)) (*ec2.StopInstancesOutput, error) {
 	args := m.Called(ctx, params)
-	if args.Get(0) != nil {
-		return args.Get(0).(*ec2.StopInstancesOutput), args.Error(1)
+	if args.Get(1) != nil {
+		return nil, args.Get(1).(error)
 	}
-	
-	if m.StopInstancesFunc != nil {
-		return m.StopInstancesFunc(ctx, params, optFns...)
-	}
-	
-	return m.StopInstancesOutput, nil
+	return args.Get(0).(*ec2.StopInstancesOutput), nil
 }
 
 // StartInstances implements the EC2 client interface
 func (m *MockEC2Client) StartInstances(ctx context.Context, params *ec2.StartInstancesInput, optFns ...func(*ec2.Options)) (*ec2.StartInstancesOutput, error) {
 	args := m.Called(ctx, params)
-	if args.Get(0) != nil {
-		return args.Get(0).(*ec2.StartInstancesOutput), args.Error(1)
+	if args.Get(1) != nil {
+		return nil, args.Get(1).(error)
 	}
-	
-	if m.StartInstancesFunc != nil {
-		return m.StartInstancesFunc(ctx, params, optFns...)
+	return args.Get(0).(*ec2.StartInstancesOutput), nil
+}
+
+// NewInstanceRunningWaiter returns a mock running waiter
+func (m *MockEC2Client) NewInstanceRunningWaiter() interface {
+	Wait(ctx context.Context, params *ec2.DescribeInstancesInput, maxWaitDur time.Duration, optFns ...func(*ec2.InstanceRunningWaiterOptions)) error
+} {
+	return m.InstanceRunningWaiter
+}
+
+// NewInstanceStoppedWaiter returns a mock stopped waiter
+func (m *MockEC2Client) NewInstanceStoppedWaiter() interface {
+	Wait(ctx context.Context, params *ec2.DescribeInstancesInput, maxWaitDur time.Duration, optFns ...func(*ec2.InstanceStoppedWaiterOptions)) error
+} {
+	return m.InstanceStoppedWaiter
+}
+
+// NewInstanceTerminatedWaiter returns a mock terminated waiter
+func (m *MockEC2Client) NewInstanceTerminatedWaiter() interface {
+	Wait(ctx context.Context, params *ec2.DescribeInstancesInput, maxWaitDur time.Duration, optFns ...func(*ec2.InstanceTerminatedWaiterOptions)) error
+} {
+	return &waiters.MockInstanceTerminatedWaiter{
+		Mock: mock.Mock{},
 	}
-	
-	return m.StartInstancesOutput, nil
+}
+
+// NewVolumeAvailableWaiter returns a mock volume available waiter
+func (m *MockEC2Client) NewVolumeAvailableWaiter() interface {
+	Wait(ctx context.Context, params *ec2.DescribeVolumesInput, maxWaitDur time.Duration, optFns ...func(*ec2.VolumeAvailableWaiterOptions)) error
+} {
+	return m.VolumeAvailableWaiter
+}
+
+// MockSTSClient is a mock implementation of STSClient
+type MockSTSClient struct {
+	mock.Mock
+}
+
+// NewMockSTSClient creates a new mock STS client
+func NewMockSTSClient(t *testing.T) *MockSTSClient {
+	m := &MockSTSClient{}
+	m.Test(t)
+	return m
+}
+
+// NewMockSTSClientWithoutT creates a new mock STS client without testing.T
+func NewMockSTSClientWithoutT() *MockSTSClient {
+	return &MockSTSClient{}
+}
+
+// GetCallerIdentity implements the STS client interface
+func (m *MockSTSClient) GetCallerIdentity(ctx context.Context, params *sts.GetCallerIdentityInput, optFns ...func(*sts.Options)) (*sts.GetCallerIdentityOutput, error) {
+	args := m.Called(ctx, params, optFns)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*sts.GetCallerIdentityOutput), args.Error(1)
+}
+
+// AssumeRole implements the STS client interface
+func (m *MockSTSClient) AssumeRole(ctx context.Context, params *sts.AssumeRoleInput, optFns ...func(*sts.Options)) (*sts.AssumeRoleOutput, error) {
+	args := m.Called(ctx, params, optFns)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*sts.AssumeRoleOutput), args.Error(1)
+}
+
+// MockIAMClient is a mock implementation of IAMClient
+type MockIAMClient struct {
+	mock.Mock
+}
+
+// NewMockIAMClient creates a new mock IAM client
+func NewMockIAMClient(t *testing.T) *MockIAMClient {
+	m := &MockIAMClient{}
+	m.Test(t)
+	return m
+}
+
+// NewMockIAMClientWithoutT creates a new mock IAM client without testing.T
+func NewMockIAMClientWithoutT() *MockIAMClient {
+	return &MockIAMClient{}
+}
+
+// GetUser implements the IAM client interface
+func (m *MockIAMClient) GetUser(ctx context.Context, params *iam.GetUserInput, optFns ...func(*iam.Options)) (*iam.GetUserOutput, error) {
+	args := m.Called(ctx, params, optFns)
+	return args.Get(0).(*iam.GetUserOutput), args.Error(1)
+}
+
+// ListRoles implements the IAM client interface
+func (m *MockIAMClient) ListRoles(ctx context.Context, params *iam.ListRolesInput, optFns ...func(*iam.Options)) (*iam.ListRolesOutput, error) {
+	args := m.Called(ctx, params, optFns)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*iam.ListRolesOutput), args.Error(1)
+}
+
+// ListUsers implements the IAM client interface
+func (m *MockIAMClient) ListUsers(ctx context.Context, params *iam.ListUsersInput, optFns ...func(*iam.Options)) (*iam.ListUsersOutput, error) {
+	args := m.Called(ctx, params, optFns)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*iam.ListUsersOutput), args.Error(1)
 }

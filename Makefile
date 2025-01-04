@@ -79,6 +79,12 @@ test:
 		golang:$(GO_VERSION)-alpine \
 		/bin/sh -c "go test -v ./... -count=1"
 
+mod:
+	@echo "Running go mod..."
+	docker run $(DOCKER_RUN_OPTS) \
+		golang:$(GO_VERSION)-alpine \
+		/bin/sh -c "go mod download && go mod verify && go mod tidy"
+
 # Format/fix code using golangci-lint
 lint:
 	@echo "Formatting code..."
@@ -97,7 +103,7 @@ docker-test:
 	@echo "Running tests in Docker..."
 	docker run $(DOCKER_RUN_OPTS) \
 		golang:$(GO_VERSION)-alpine \
-		/bin/sh -c "go mod download && go test -v ./..."
+		/bin/sh -c "go test -v ./..."
 
 # Run go mod tidy in Docker
 docker-tidy:
@@ -118,15 +124,33 @@ init:
 # Run commands with mock data
 mock-test: build
 	@echo "Running commands with mock data..."
+	@echo "\nListing Resources:"
 	./$(BINARY_NAME) list amis --mock
 	./$(BINARY_NAME) list instances --mock
 	./$(BINARY_NAME) list subnets --mock
 	./$(BINARY_NAME) list keys --mock
-	./$(BINARY_NAME) check-migrate --mock
+
+	@echo "\nChecking Status:"
 	./$(BINARY_NAME) check credentials --mock
-	./$(BINARY_NAME) create --mock --image ami-123 --type t2.micro --key test-key --subnet subnet-123
-	./$(BINARY_NAME) create --mock --latest --type t2.micro --key test-key --subnet subnet-123
-	./$(BINARY_NAME) backup --mock --instance i-123
-	./$(BINARY_NAME) migrate --mock --instance i-123 --new-ami ami-456
-	./$(BINARY_NAME) restore --mock --instance i-123 --snapshot snap-123
-	./$(BINARY_NAME) delete --mock --instance i-123
+	./$(BINARY_NAME) check migrate --check-instance-id i-1234567890abcdef0 --check-target-ami ami-0987654321fedcba0 --mock
+
+	@echo "\nInstance Management:"
+	./$(BINARY_NAME) create --mock --key test-key --subnet subnet-123 --ami ami-123 --type t2.micro --name test-instance
+	./$(BINARY_NAME) backup --mock --instance-id i-1234567890abcdef0
+	./$(BINARY_NAME) restore --mock --instance-id i-1234567890abcdef0 --snapshot snap-123
+	./$(BINARY_NAME) restore --mock --instance-id i-1234567890abcdef0 --version v1.0.0
+
+	@echo "\nInstance State Management:"
+	./$(BINARY_NAME) start --mock --instance i-1234567890abcdef0
+	./$(BINARY_NAME) stop --mock --instance i-1234567890abcdef0
+	./$(BINARY_NAME) restart --mock --instance i-1234567890abcdef0
+
+	@echo "\nMigration:"
+	./$(BINARY_NAME) migrate --mock --instance-id i-1234567890abcdef0 --new-ami ami-0987654321fedcba0
+	./$(BINARY_NAME) migrate --mock --enabled --new-ami ami-0987654321fedcba0
+	./$(BINARY_NAME) migrate --mock --instance-id i-1234567890abcdef0 --version v1.0.0
+
+	@echo "\nCleanup:"
+	./$(BINARY_NAME) delete --mock --instance i-1234567890abcdef0
+
+	@echo "\nAll mock tests completed successfully!"

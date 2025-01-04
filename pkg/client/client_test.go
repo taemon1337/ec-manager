@@ -8,10 +8,7 @@ import (
 
 func TestNewClient(t *testing.T) {
 	t.Run("with mock mode", func(t *testing.T) {
-		cfg := &Config{
-			MockMode: true,
-		}
-		client, err := NewClient(cfg)
+		client, err := NewClient(true, "", "us-east-1")
 		assert.NoError(t, err)
 		assert.NotNil(t, client)
 	})
@@ -35,15 +32,28 @@ func TestLoadAWSConfig(t *testing.T) {
 
 func TestGetEC2Client(t *testing.T) {
 	t.Run("with mock mode", func(t *testing.T) {
-		cfg := &Config{
-			MockMode: true,
-		}
-		client, err := NewClient(cfg)
+		client, err := NewClient(true, "", "us-east-1")
 		assert.NoError(t, err)
 		assert.NotNil(t, client)
 
 		ec2Client := client.GetEC2Client()
 		assert.NotNil(t, ec2Client)
+	})
+
+	// Skip tests that require AWS credentials
+	t.Run("with real client", func(t *testing.T) {
+		t.Skip("Skipping test that requires AWS credentials")
+	})
+}
+
+func TestGetAMIService(t *testing.T) {
+	t.Run("with mock mode", func(t *testing.T) {
+		client, err := NewClient(true, "", "us-east-1")
+		assert.NoError(t, err)
+		assert.NotNil(t, client)
+
+		amiService := client.GetAMIService()
+		assert.NotNil(t, amiService)
 	})
 
 	// Skip tests that require AWS credentials

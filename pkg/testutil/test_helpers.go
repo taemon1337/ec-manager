@@ -21,13 +21,13 @@ const (
 )
 
 // SetupMockEC2Client sets up a mock EC2 client for testing
-func SetupMockEC2Client() *mock.MockEC2Client {
-	return mock.NewMockEC2Client()
+func SetupMockEC2Client(t *testing.T) *mock.MockEC2Client {
+	return mock.NewMockEC2Client(t)
 }
 
 // GetTestContext returns a context with a mock EC2 client
-func GetTestContext() context.Context {
-	return context.WithValue(context.Background(), EC2ClientKey, SetupMockEC2Client())
+func GetTestContext(t *testing.T) context.Context {
+	return context.WithValue(context.Background(), EC2ClientKey, SetupMockEC2Client(t))
 }
 
 // GetTestContextWithClient returns a context with the given mock EC2 client
@@ -38,7 +38,7 @@ func GetTestContextWithClient(client *mock.MockEC2Client) context.Context {
 // SetupTestCommand sets up a test command with the given arguments
 func SetupTestCommand(cmd *cobra.Command, args []string) error {
 	if cmd.Context() == nil {
-		cmd.SetContext(GetTestContext())
+		cmd.SetContext(GetTestContext(&testing.T{}))
 	}
 	cmd.SetArgs(args)
 	return cmd.Execute()
@@ -100,7 +100,7 @@ func MockImage(id string, os string, version string) types.Image {
 		})
 	}
 	return types.Image{
-		ImageId:      aws.String(id),
+		ImageId:     aws.String(id),
 		Name:        aws.String("test-ami"),
 		Description: aws.String("Test AMI"),
 		State:       types.ImageStateAvailable,
@@ -110,24 +110,26 @@ func MockImage(id string, os string, version string) types.Image {
 
 // SetupInstanceMock configures common instance-related mock responses
 func SetupInstanceMock(client *mock.MockEC2Client, instance types.Instance) {
-	client.DescribeInstancesOutput = &ec2.DescribeInstancesOutput{
+	output := &ec2.DescribeInstancesOutput{
 		Reservations: []types.Reservation{
 			{
 				Instances: []types.Instance{instance},
 			},
 		},
 	}
+	client.On("DescribeInstances", mock.Anything, mock.Anything).Return(output, nil)
 }
 
 // SetupImageMock configures common image-related mock responses
 func SetupImageMock(client *mock.MockEC2Client, images ...types.Image) {
-	client.DescribeImagesOutput = &ec2.DescribeImagesOutput{
+	output := &ec2.DescribeImagesOutput{
 		Images: images,
 	}
+	client.On("DescribeImages", mock.Anything, mock.Anything).Return(output, nil)
 }
 
 // SetupDefaultMocks configures common mock responses for testing
-func SetupDefaultMocks(client *mock.MockEC2Client) {
+func SetupDefaultMocks(t *testing.T, client *mock.MockEC2Client) {
 	instance := MockInstance("i-123")
 	image := MockImage("ami-123", "RHEL9", "1.0.0")
 	SetupInstanceMock(client, instance)

@@ -19,13 +19,13 @@ docker pull ec-manager:latest
 docker run --rm \
   -v ~/.aws:/root/.aws:ro \
   ec-manager:latest \
-  list
+  list instances
 
 # Create a new instance
 docker run --rm \
   -v ~/.aws:/root/.aws:ro \
   ec-manager:latest \
-  create --os linux --size t2.micro
+  create --type t2.micro --key my-key --subnet subnet-xxx
 
 # Migrate an instance to a new AMI
 docker run --rm \
@@ -48,122 +48,65 @@ docker run --rm \
 
 ### Instance Management
 - `backup`: Backup an EC2 instance
+  - `-i, --instance-id`: Instance ID to backup (required)
+
 - `create`: Create a new EC2 instance
+  - `--key`: SSH key name (required)
+  - `--subnet`: Subnet ID (required)
+  - `--ami`: AMI ID
+  - `--type`: Instance type (default: t2.micro)
+  - `--name`: Instance name
+
 - `delete`: Delete an EC2 instance
-- `list`: List your EC2 instances
-- `restore`: Restore an instance from a snapshot
-- `ssh`: SSH into an EC2 instance
+  - `-i, --instance`: Instance ID to delete (required)
+
+- `restore`: Restore an instance from a snapshot or version
+  - `-i, --instance-id`: Instance ID to restore (required)
+  - `-s, --snapshot`: Snapshot ID to restore from (optional if using --version)
+  - `-v, --version`: Version to restore to (optional if using --snapshot)
+
+### Instance State Management
+- `start`: Start an EC2 instance
+  - `-i, --instance`: Instance ID to start (required)
+
+- `stop`: Stop an EC2 instance
+  - `-i, --instance`: Instance ID to stop (required)
+
+- `restart`: Restart an EC2 instance
+  - `-i, --instance`: Instance ID to restart (required)
 
 ### AMI Management
-- `check`: Check various aspects of your AWS resources
 - `check migrate`: Check instances that need AMI migration
+  - `-i, --check-instance-id`: Instance ID to check for migration
+  - `-a, --check-target-ami`: New AMI ID to migrate to
+
 - `migrate`: Migrate an EC2 instance to a new AMI
-- `list amis`: List available AMIs in your account
+  - `-i, --instance-id`: Instance to migrate
+  - `-a, --new-ami`: New AMI ID to migrate to
+  - `-e, --enabled`: Migrate all enabled instances
+  - `-v, --version`: Version to migrate to
 
 ### Resource Listing
 - `list instances`: List all EC2 instances
+- `list amis`: List available AMIs in your account
 - `list keys`: List available SSH key pairs
 - `list subnets`: List available VPC subnets
 
-### Authentication and Credentials
+### Authentication and Access
 - `check credentials`: Verify AWS credentials and permissions
 
-### Common Tasks
-
-#### 1. List Your Instances
-```bash
-# Uses your AWS credentials username
-ecman list
-
-# Or specify a different username
-ecman list --user johndoe
-```
-
-Output shows:
-- Instance name and ID
-- OS type and instance size
-- Current state (running/stopped)
-- IP addresses
-- Current and latest AMI versions
-- Migration status
-
-#### 2. Check Migration Status
-```bash
-# Check migration status for your instances
-ecman check migrate --user johndoe
-```
-
-Shows for each instance:
-- Current AMI details
-- Latest available AMI
-- Migration recommendation
-
-#### 3. Create New Instance
-```bash
-# Create a new Linux instance
-ecman create \
-  --os linux \
-  --size t2.micro \
-  --name my-instance \
-  --user johndoe
-```
-
-Options:
-- `--os`: Operating system type (linux or windows)
-- `--size`: Instance size (e.g., t2.micro, t2.small)
-- `--name`: Custom instance name (optional)
-- `--user`: AWS username (optional, defaults to AWS credentials)
-
-#### 4. Migrate Instances
-```bash
-# Migrate a specific instance
-ecman migrate \
-  --instance-id i-1234567890abcdef0 \
-  --new-ami ami-xxxxx
-
-# Migrate all enabled instances
-ecman migrate \
-  --enabled \
-  --new-ami ami-xxxxx
-```
-
-Options:
-- `--instance-id`: ID of the instance to migrate
-- `--enabled`: Only migrate instances with ami-migrate=enabled tag
-- `--new-ami`: ID of the new AMI to migrate to
-
-#### 5. Backup and Restore
-```bash
-# Backup an instance
-ecman backup --instance-id i-1234567890abcdef0
-
-# Restore from a snapshot
-ecman restore \
-  --instance-id i-1234567890abcdef0 \
-  --snapshot-id snap-xxxxx
-```
-
-#### 6. SSH into an Instance
-```bash
-# SSH into a specific instance
-ecman ssh \
-  --instance i-1234567890abcdef0 \
-  --key ~/.ssh/my-key.pem \
-  --user ec2-user
-```
-
-Options:
-- `--instance` or `-i`: ID of the instance to connect to
-- `--key` or `-k`: Path to the SSH private key file
-- `--user` or `-u`: SSH user (defaults to ec2-user)
+- `ssh`: SSH into an EC2 instance
+  - `-i, --instance`: Instance ID to SSH into (required)
+  - `-k, --key`: Path to SSH private key file (required)
+  - `-u, --user`: SSH user (default: ec2-user)
 
 ## Global Flags
 
 Available for all commands:
 - `--mock`: Enable mock mode for testing
 - `--log-level`: Set log level (debug, info, warn, error)
-- `--timeout`: Timeout for AWS operations (default: 5m)
-- `--user`: Your AWS username (defaults to current AWS user)
+- `--region`: AWS region to use
+- `--profile`: AWS profile to use
 
 ## Development
 

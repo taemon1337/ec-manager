@@ -16,21 +16,21 @@ import (
 var (
 	// Common errors
 	ErrInstanceNotFound = errors.New("instance not found")
-	ErrAMINotFound     = errors.New("AMI not found")
-	ErrNoInstances     = errors.New("no instances launched")
+	ErrAMINotFound      = errors.New("AMI not found")
+	ErrNoInstances      = errors.New("no instances launched")
 
 	// Operation errors
-	ErrRunInstances       = errors.New("failed to launch instance")
-	ErrCreateTags         = errors.New("failed to create tags")
-	ErrCreateImage        = errors.New("failed to create image")
-	ErrCreateSnapshot     = errors.New("failed to create snapshot")
-	ErrDescribeInstances  = errors.New("failed to describe instances")
-	ErrDescribeImages     = errors.New("failed to describe images")
-	ErrDescribeSnapshots  = errors.New("failed to describe snapshots")
-	ErrStopInstance       = errors.New("failed to stop instance")
-	ErrStartInstance      = errors.New("failed to start instance")
-	ErrTerminateInstance  = errors.New("failed to terminate instance")
-	ErrCreateImageFailed  = errors.New("failed to create image")
+	ErrRunInstances         = errors.New("failed to launch instance")
+	ErrCreateTags           = errors.New("failed to create tags")
+	ErrCreateImage          = errors.New("failed to create image")
+	ErrCreateSnapshot       = errors.New("failed to create snapshot")
+	ErrDescribeInstances    = errors.New("failed to describe instances")
+	ErrDescribeImages       = errors.New("failed to describe images")
+	ErrDescribeSnapshots    = errors.New("failed to describe snapshots")
+	ErrStopInstance         = errors.New("failed to stop instance")
+	ErrStartInstance        = errors.New("failed to start instance")
+	ErrTerminateInstance    = errors.New("failed to terminate instance")
+	ErrCreateImageFailed    = errors.New("failed to create image")
 	ErrCreateImageNilOutput = errors.New("failed to create image: nil output")
 )
 
@@ -45,25 +45,24 @@ type EC2Client interface {
 	AttachVolume(ctx context.Context, params *ec2.AttachVolumeInput, optFns ...func(*ec2.Options)) (*ec2.AttachVolumeOutput, error)
 	CreateSnapshot(ctx context.Context, params *ec2.CreateSnapshotInput, optFns ...func(*ec2.Options)) (*ec2.CreateSnapshotOutput, error)
 	TerminateInstances(ctx context.Context, params *ec2.TerminateInstancesInput, optFns ...func(*ec2.Options)) (*ec2.TerminateInstancesOutput, error)
-	CreateVolume(ctx context.Context, params *ec2.CreateVolumeInput, optFns ...func(*ec2.Options)) (*ec2.CreateVolumeOutput, error)
-	CreateImage(ctx context.Context, params *ec2.CreateImageInput, optFns ...func(*ec2.Options)) (*ec2.CreateImageOutput, error)
 	DescribeSnapshots(ctx context.Context, params *ec2.DescribeSnapshotsInput, optFns ...func(*ec2.Options)) (*ec2.DescribeSnapshotsOutput, error)
 	DescribeVolumes(ctx context.Context, params *ec2.DescribeVolumesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeVolumesOutput, error)
 	DescribeSubnets(ctx context.Context, params *ec2.DescribeSubnetsInput, optFns ...func(*ec2.Options)) (*ec2.DescribeSubnetsOutput, error)
 	DescribeKeyPairs(ctx context.Context, params *ec2.DescribeKeyPairsInput, optFns ...func(*ec2.Options)) (*ec2.DescribeKeyPairsOutput, error)
-	NewInstanceRunningWaiter() *ec2.InstanceRunningWaiter
-	NewInstanceStoppedWaiter() *ec2.InstanceStoppedWaiter
-	NewInstanceTerminatedWaiter() *ec2.InstanceTerminatedWaiter
-	NewVolumeAvailableWaiter() *ec2.VolumeAvailableWaiter
-}
-
-// InstanceConfig holds configuration for creating a new EC2 instance
-type InstanceConfig struct {
-	ImageID      string
-	InstanceType string
-	KeyName      string
-	SubnetID     string
-	UserData     string
+	CreateImage(ctx context.Context, params *ec2.CreateImageInput, optFns ...func(*ec2.Options)) (*ec2.CreateImageOutput, error)
+	CreateVolume(ctx context.Context, params *ec2.CreateVolumeInput, optFns ...func(*ec2.Options)) (*ec2.CreateVolumeOutput, error)
+	NewInstanceRunningWaiter() interface {
+		Wait(ctx context.Context, params *ec2.DescribeInstancesInput, maxWaitDur time.Duration, optFns ...func(*ec2.InstanceRunningWaiterOptions)) error
+	}
+	NewInstanceStoppedWaiter() interface {
+		Wait(ctx context.Context, params *ec2.DescribeInstancesInput, maxWaitDur time.Duration, optFns ...func(*ec2.InstanceStoppedWaiterOptions)) error
+	}
+	NewInstanceTerminatedWaiter() interface {
+		Wait(ctx context.Context, params *ec2.DescribeInstancesInput, maxWaitDur time.Duration, optFns ...func(*ec2.InstanceTerminatedWaiterOptions)) error
+	}
+	NewVolumeAvailableWaiter() interface {
+		Wait(ctx context.Context, params *ec2.DescribeVolumesInput, maxWaitDur time.Duration, optFns ...func(*ec2.VolumeAvailableWaiterOptions)) error
+	}
 }
 
 // Service provides methods for managing EC2 instances
@@ -95,7 +94,7 @@ func (s *Service) BackupInstance(ctx context.Context, instanceID string) (string
 	// Create an AMI from the instance
 	createImageOutput, err := s.client.CreateImage(ctx, &ec2.CreateImageInput{
 		InstanceId: aws.String(instanceID),
-		Name:      aws.String(fmt.Sprintf("backup-%s-%s", instanceID, time.Now().Format("2006-01-02-15-04-05"))),
+		Name:       aws.String(fmt.Sprintf("backup-%s-%s", instanceID, time.Now().Format("2006-01-02-15-04-05"))),
 	})
 	if err != nil {
 		return "", fmt.Errorf("failed to create AMI: %w", err)
@@ -179,21 +178,25 @@ func (s *Service) MigrateInstance(ctx context.Context, instanceID string, newAMI
 	}
 
 	// Tag the new instance
-	_, err = s.client.CreateTags(ctx, &ec2.CreateTagsInput{
-		Resources: []string{newInstanceID},
-		Tags: []types.Tag{
-			{
-				Key:   aws.String("Name"),
-				Value: aws.String(fmt.Sprintf("Migrated from %s", instanceID)),
-			},
-			{
-				Key:   aws.String("SourceInstanceId"),
-				Value: aws.String(instanceID),
-			},
-		},
+	var tags []types.Tag
+	tags = append(tags, types.Tag{
+		Key:   aws.String("Name"),
+		Value: aws.String(fmt.Sprintf("Migrated from %s", instanceID)),
 	})
-	if err != nil {
-		return "", fmt.Errorf("failed to tag new instance: %w", err)
+	tags = append(tags, types.Tag{
+		Key:   aws.String("SourceInstanceId"),
+		Value: aws.String(instanceID),
+	})
+
+	if len(tags) > 0 {
+		tagInput := &ec2.CreateTagsInput{
+			Resources: []string{newInstanceID},
+			Tags:      tags,
+		}
+		_, err = s.client.CreateTags(ctx, tagInput)
+		if err != nil {
+			return "", fmt.Errorf("failed to create tags: %w", err)
+		}
 	}
 
 	return newInstanceID, nil
@@ -288,6 +291,34 @@ func (s *Service) GetInstance(ctx context.Context, instanceID string) (*types.In
 	return nil, ErrInstanceNotFound
 }
 
+// DescribeInstance returns details of a specific EC2 instance
+func (s *Service) DescribeInstance(ctx context.Context, instanceID string) (*types.Instance, error) {
+	output, err := s.client.DescribeInstances(ctx, &ec2.DescribeInstancesInput{
+		InstanceIds: []string{instanceID},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to describe instance: %w", err)
+	}
+
+	if len(output.Reservations) == 0 || len(output.Reservations[0].Instances) == 0 {
+		return nil, nil
+	}
+
+	return &output.Reservations[0].Instances[0], nil
+}
+
+// DescribeImages returns details of specific AMIs
+func (s *Service) DescribeImages(ctx context.Context, imageIDs []string) (*ec2.DescribeImagesOutput, error) {
+	output, err := s.client.DescribeImages(ctx, &ec2.DescribeImagesInput{
+		ImageIds: imageIDs,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to describe images: %w", err)
+	}
+
+	return output, nil
+}
+
 // UpdateLatestAMITag removes the 'latest' tag from all AMIs with the given name prefix
 // and adds it to the specified AMI
 func (s *Service) UpdateLatestAMITag(ctx context.Context, namePrefix, newLatestAMI string) error {
@@ -315,7 +346,7 @@ func (s *Service) UpdateLatestAMITag(ctx context.Context, namePrefix, newLatestA
 		if *img.ImageId == newLatestAMI {
 			continue // Skip the new AMI
 		}
-		_, err := s.client.CreateTags(ctx, &ec2.CreateTagsInput{
+		_, err = s.client.CreateTags(ctx, &ec2.CreateTagsInput{
 			Resources: []string{*img.ImageId},
 			Tags: []types.Tag{
 				{
@@ -445,7 +476,7 @@ func (s *Service) UpdateAMITags(ctx context.Context, amiID string, tags map[stri
 
 	_, err := s.client.CreateTags(ctx, &ec2.CreateTagsInput{
 		Resources: []string{amiID},
-		Tags:     ec2Tags,
+		Tags:      ec2Tags,
 	})
 	return err
 }
@@ -470,17 +501,25 @@ func (s *Service) LaunchInstance(ctx context.Context, amiID string, name string)
 	instance := runOutput.Instances[0]
 
 	// Tag the instance
-	_, err = s.client.CreateTags(ctx, &ec2.CreateTagsInput{
-		Resources: []string{*instance.InstanceId},
-		Tags: []types.Tag{
-			{
-				Key:   aws.String("Name"),
-				Value: aws.String(name),
-			},
-		},
-	})
-	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrCreateTags, err)
+	var tags []types.Tag
+	if name != "" {
+		tags = append(tags, types.Tag{
+			Key:   aws.String("Name"),
+			Value: aws.String(name),
+		})
+	}
+
+	if len(tags) > 0 {
+		tagOutput, tagErr := s.client.CreateTags(ctx, &ec2.CreateTagsInput{
+			Resources: []string{*instance.InstanceId},
+			Tags:      tags,
+		})
+		if tagErr != nil {
+			return nil, fmt.Errorf("%w: %v", ErrCreateTags, tagErr)
+		}
+		if tagOutput == nil {
+			return nil, fmt.Errorf("%w: nil output", ErrCreateTags)
+		}
 	}
 
 	return &instance, nil
@@ -509,92 +548,73 @@ func (a *AMI) Launch(ctx context.Context) (*types.Instance, error) {
 	return a.service.LaunchInstance(ctx, a.ImageId, a.Name)
 }
 
-// FindAMI finds an AMI by name
-func (s *Service) FindAMI(ctx context.Context, name string) (*types.Image, error) {
-	// Get AMI details
-	describeImagesOutput, err := s.client.DescribeImages(ctx, &ec2.DescribeImagesInput{
-		Filters: []types.Filter{
-			{
-				Name:   aws.String("name"),
-				Values: []string{name},
-			},
-		},
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to describe image: %w", err)
+// FindAMI finds an AMI by its ID
+func (s *Service) FindAMI(ctx context.Context, amiID string) (*types.Image, error) {
+	input := &ec2.DescribeImagesInput{
+		ImageIds: []string{amiID},
 	}
 
-	if len(describeImagesOutput.Images) == 0 {
+	output, err := s.client.DescribeImages(ctx, input)
+	if err != nil {
+		return nil, fmt.Errorf("failed to describe AMI: %w", err)
+	}
+
+	if output == nil || len(output.Images) == 0 {
 		return nil, fmt.Errorf("AMI not found")
 	}
 
-	return &describeImagesOutput.Images[0], nil
+	return &output.Images[0], nil
 }
 
 // GetImage gets an AMI by ID
-func (s *Service) GetImage(ctx context.Context, imageID string) (*types.Image, error) {
-	describeImagesOutput, err := s.client.DescribeImages(ctx, &ec2.DescribeImagesInput{
-		ImageIds: []string{imageID},
-	})
+func (s *Service) GetImage(ctx context.Context, imageId string) (*types.Image, error) {
+	input := &ec2.DescribeImagesInput{
+		ImageIds: []string{imageId},
+	}
+
+	output, err := s.client.DescribeImages(ctx, input)
 	if err != nil {
-		return nil, fmt.Errorf("failed to describe image: %w", err)
+		return nil, fmt.Errorf("failed to describe images: %w", err)
 	}
 
-	if len(describeImagesOutput.Images) == 0 {
-		return nil, fmt.Errorf("AMI not found: %s", imageID)
+	if output == nil || len(output.Images) == 0 {
+		return nil, fmt.Errorf("AMI not found")
 	}
 
-	return &describeImagesOutput.Images[0], nil
+	return &output.Images[0], nil
 }
 
 // CreateAMI creates a new AMI from an instance
 func (s *Service) CreateAMI(ctx context.Context, instanceID, name, description string) (*types.Image, error) {
 	log.Printf("CreateAMI: Starting AMI creation for instance %s with name %s", instanceID, name)
-	
-	// Get instance details to ensure it exists
+
+	// First, verify the instance exists
 	instance, err := s.GetInstance(ctx, instanceID)
 	if err != nil {
 		log.Printf("CreateAMI: Failed to get instance: %v", err)
-		return nil, fmt.Errorf("failed to get instance: %w", err)
+		return nil, err
 	}
-	log.Printf("CreateAMI: Successfully found instance %s", *instance.InstanceId)
+	log.Printf("CreateAMI: Successfully found instance %s", instanceID)
 
-	// Create AMI
-	createImageOutput, err := s.client.CreateImage(ctx, &ec2.CreateImageInput{
-		InstanceId:  aws.String(instanceID),
+	// Create the AMI
+	createOutput, err := s.client.CreateImage(ctx, &ec2.CreateImageInput{
+		InstanceId:  instance.InstanceId,
 		Name:        aws.String(name),
 		Description: aws.String(description),
 	})
 	if err != nil {
-		log.Printf("CreateAMI: Failed to create image: %v", err)
-		return nil, fmt.Errorf("%w: %v", ErrCreateImageFailed, err)
+		log.Printf("CreateAMI: Failed to create AMI: %v", err)
+		return nil, fmt.Errorf("failed to create AMI: %w", err)
 	}
-	if createImageOutput == nil {
-		log.Printf("CreateAMI: CreateImage returned nil output")
-		return nil, ErrCreateImageNilOutput
+	if createOutput == nil {
+		log.Printf("CreateAMI: Failed to create AMI: nil output")
+		return nil, fmt.Errorf("failed to create AMI: nil output")
 	}
-	log.Printf("CreateAMI: Successfully created AMI with ID: %s", *createImageOutput.ImageId)
+	log.Printf("CreateAMI: Successfully created AMI with ID: %s", *createOutput.ImageId)
 
-	// Get AMI details
-	describeImagesOutput, err := s.client.DescribeImages(ctx, &ec2.DescribeImagesInput{
-		ImageIds: []string{*createImageOutput.ImageId},
-	})
-	if err != nil {
-		log.Printf("CreateAMI: Failed to describe image: %v", err)
-		return nil, fmt.Errorf("failed to describe image: %w", err)
-	}
-
-	if len(describeImagesOutput.Images) == 0 {
-		log.Printf("CreateAMI: No images found after creation")
-		return nil, fmt.Errorf("AMI not found")
-	}
-	log.Printf("CreateAMI: Successfully retrieved AMI details")
-
-	ami := describeImagesOutput.Images[0]
-
-	// Create tags
-	_, err = s.client.CreateTags(ctx, &ec2.CreateTagsInput{
-		Resources: []string{*ami.ImageId},
+	// Add tags to the AMI
+	output, err := s.client.CreateTags(ctx, &ec2.CreateTagsInput{
+		Resources: []string{*createOutput.ImageId},
 		Tags: []types.Tag{
 			{
 				Key:   aws.String("Name"),
@@ -603,10 +623,110 @@ func (s *Service) CreateAMI(ctx context.Context, instanceID, name, description s
 		},
 	})
 	if err != nil {
-		log.Printf("CreateAMI: Failed to create tags: %v", err)
-		return nil, fmt.Errorf("failed to create tags: %w", err)
+		log.Printf("CreateAMI: Failed to add tags to AMI %s: %v", *createOutput.ImageId, err)
+		return nil, fmt.Errorf("failed to add tags to AMI: %w", err)
 	}
-	log.Printf("CreateAMI: Successfully added tags to AMI %s", *ami.ImageId)
+	if output == nil {
+		log.Printf("CreateAMI: Failed to add tags to AMI %s: nil output", *createOutput.ImageId)
+		return nil, fmt.Errorf("failed to add tags to AMI: nil output")
+	}
+	log.Printf("CreateAMI: Successfully added tags to AMI %s", *createOutput.ImageId)
 
-	return &ami, nil
+	return &types.Image{
+		ImageId: createOutput.ImageId,
+		Name:    aws.String(name),
+	}, nil
+}
+
+// StopInstance stops an EC2 instance
+func (s *Service) StopInstance(ctx context.Context, instanceID string) error {
+	input := &ec2.StopInstancesInput{
+		InstanceIds: []string{instanceID},
+	}
+
+	_, err := s.client.StopInstances(ctx, input)
+	if err != nil {
+		return fmt.Errorf("failed to stop instance: %w", err)
+	}
+
+	// Poll for instance state
+	for {
+		describeInput := &ec2.DescribeInstancesInput{
+			InstanceIds: []string{instanceID},
+		}
+
+		output, err := s.client.DescribeInstances(ctx, describeInput)
+		if err != nil {
+			return fmt.Errorf("failed to describe instance: %w", err)
+		}
+
+		if len(output.Reservations) == 0 || len(output.Reservations[0].Instances) == 0 {
+			return fmt.Errorf("instance not found")
+		}
+
+		state := output.Reservations[0].Instances[0].State.Name
+		if state == types.InstanceStateNameStopped {
+			break
+		}
+
+		time.Sleep(5 * time.Second)
+	}
+
+	return nil
+}
+
+// StartInstance starts an EC2 instance and waits for it to be running
+func (s *Service) StartInstance(ctx context.Context, instanceID string) error {
+	// Start the instance
+	_, err := s.client.StartInstances(ctx, &ec2.StartInstancesInput{
+		InstanceIds: []string{instanceID},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to start instance: %w", err)
+	}
+
+	// Wait for the instance to be running
+	waiter := s.client.NewInstanceRunningWaiter()
+	err = waiter.Wait(ctx, &ec2.DescribeInstancesInput{
+		InstanceIds: []string{instanceID},
+	}, 5*time.Minute)
+	if err != nil {
+		return fmt.Errorf("error waiting for instance to start: %w", err)
+	}
+
+	// Verify the instance state
+	_, err = s.client.DescribeInstances(ctx, &ec2.DescribeInstancesInput{
+		InstanceIds: []string{instanceID},
+	})
+	if err != nil {
+		return fmt.Errorf("error verifying instance state: %w", err)
+	}
+
+	return nil
+}
+
+// RestartInstance restarts an EC2 instance by stopping and starting it
+func (s *Service) RestartInstance(ctx context.Context, instanceID string) error {
+	// First stop the instance
+	err := s.StopInstance(ctx, instanceID)
+	if err != nil {
+		return err
+	}
+
+	// Then start the instance
+	err = s.StartInstance(ctx, instanceID)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// InstanceConfig holds configuration for creating a new EC2 instance
+type InstanceConfig struct {
+	ImageID      string
+	InstanceType string
+	KeyName      string
+	SubnetID     string
+	UserData     string
 }

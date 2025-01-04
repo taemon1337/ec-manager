@@ -3,99 +3,156 @@ package client
 import (
 	"context"
 	"fmt"
-	"log"
-	"os"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/credentials/stscreds"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
+	"github.com/taemon1337/ec-manager/pkg/ami"
 	"github.com/taemon1337/ec-manager/pkg/mock"
 	ecTypes "github.com/taemon1337/ec-manager/pkg/types"
 )
 
 // Client represents a client for interacting with AWS services
 type Client struct {
-	ec2Client ecTypes.EC2Client
-	mockMode  bool
-}
-
-// Config holds the configuration for the client
-type Config struct {
-	Profile  string
-	Region   string
-	MockMode bool
+	cfg      aws.Config
+	mockMode bool
+	mockEC2  *mock.MockEC2Client
+	realEC2  *ec2.Client
+	profile  string
+	region   string
 }
 
 // NewDefaultConfig returns a default configuration
-func NewDefaultConfig() *Config {
-	return &Config{
-		Region: "us-east-1",
-	}
+func NewDefaultConfig() (bool, string, string) {
+	return false, "", "us-east-1"
 }
 
 // NewClient creates a new AWS client
-func NewClient(cfg *Config) (*Client, error) {
-	if cfg.MockMode {
-		return &Client{
-			ec2Client: mock.NewMockEC2Client(),
-			mockMode:  true,
-		}, nil
+func NewClient(mockMode bool, profile, region string) (*Client, error) {
+	client := &Client{
+		mockMode: mockMode,
+		profile:  profile,
+		region:   region,
 	}
 
-	// Load AWS configuration
-	awsCfg, err := loadAWSConfig(cfg)
+	if mockMode {
+		// Create mock EC2 client
+		mockEC2 := mock.NewMockEC2ClientWithoutT()
+		mock.SetupDefaultMockResponses(mockEC2)
+		client.mockEC2 = mockEC2
+		return client, nil
+	}
+
+	// Only load AWS config if not in mock mode
+	cfg, err := client.loadAWSConfig()
 	if err != nil {
 		return nil, fmt.Errorf("failed to load AWS config: %w", err)
 	}
+	client.cfg = cfg
 
-	// Create EC2 client
-	ec2Client := &EC2ClientWrapper{
-		Client: ec2.NewFromConfig(awsCfg),
-	}
+	// Create real EC2 client
+	client.realEC2 = ec2.NewFromConfig(cfg)
 
-	return &Client{
-		ec2Client: ec2Client,
-		mockMode:  cfg.MockMode,
-	}, nil
+	return client, nil
 }
 
-// GetEC2Client returns the EC2 client
+// loadAWSConfig loads the AWS configuration
+func (c *Client) loadAWSConfig() (aws.Config, error) {
+	var cfg aws.Config
+	var err error
+
+	opts := []func(*config.LoadOptions) error{
+		config.WithRegion(c.region),
+	}
+
+	if c.profile != "" {
+		opts = append(opts, config.WithSharedConfigProfile(c.profile))
+	}
+
+	cfg, err = config.LoadDefaultConfig(context.Background(), opts...)
+	if err != nil {
+		return cfg, fmt.Errorf("failed to load AWS config: %w", err)
+	}
+
+	// Verify credentials
+	stsClient := sts.NewFromConfig(cfg)
+	_, err = stsClient.GetCallerIdentity(context.Background(), &sts.GetCallerIdentityInput{})
+	if err != nil {
+		return cfg, fmt.Errorf("failed to verify AWS credentials: %w", err)
+	}
+
+	return cfg, nil
+}
+
+// GetEC2Client returns the EC2 client (either mock or real)
 func (c *Client) GetEC2Client() ecTypes.EC2Client {
-	return c.ec2Client
+	if c.mockMode {
+		return c.mockEC2
+	}
+	return &EC2ClientWrapper{c.realEC2}
+}
+
+// GetAMIService returns a new AMI service instance
+func (c *Client) GetAMIService() *ami.Service {
+	return ami.NewService(c.GetEC2Client())
 }
 
 // ListImages lists AMIs based on the provided filters
 func (c *Client) ListImages(filters []types.Filter) ([]types.Image, error) {
 	if c.mockMode {
-		return []types.Image{
-			{
-				ImageId:      aws.String("ami-123"),
-				Name:        aws.String("test-ami"),
-				Description: aws.String("Test AMI"),
-				State:       types.ImageStateAvailable,
-				Tags: []types.Tag{
-					{
-						Key:   aws.String("Project"),
-						Value: aws.String("ec-manager"),
-					},
-				},
-			},
-		}, nil
+		output, err := c.mockEC2.DescribeImages(context.Background(), &ec2.DescribeImagesInput{
+			Filters: filters,
+		})
+		if err != nil {
+			return nil, err
+		}
+		return output.Images, nil
 	}
 
 	input := &ec2.DescribeImagesInput{
 		Filters: filters,
 	}
 
-	output, err := c.ec2Client.DescribeImages(context.Background(), input)
+	output, err := c.realEC2.DescribeImages(context.Background(), input)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to list images: %w", err)
 	}
 
 	return output.Images, nil
+}
+
+// EC2Client is an interface for AWS EC2 client
+type EC2Client interface {
+	DescribeInstances(ctx context.Context, params *ec2.DescribeInstancesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error)
+	DescribeImages(ctx context.Context, params *ec2.DescribeImagesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeImagesOutput, error)
+	CreateImage(ctx context.Context, params *ec2.CreateImageInput, optFns ...func(*ec2.Options)) (*ec2.CreateImageOutput, error)
+	CreateTags(ctx context.Context, params *ec2.CreateTagsInput, optFns ...func(*ec2.Options)) (*ec2.CreateTagsOutput, error)
+	RunInstances(ctx context.Context, params *ec2.RunInstancesInput, optFns ...func(*ec2.Options)) (*ec2.RunInstancesOutput, error)
+	TerminateInstances(ctx context.Context, params *ec2.TerminateInstancesInput, optFns ...func(*ec2.Options)) (*ec2.TerminateInstancesOutput, error)
+	AttachVolume(ctx context.Context, params *ec2.AttachVolumeInput, optFns ...func(*ec2.Options)) (*ec2.AttachVolumeOutput, error)
+	CreateSnapshot(ctx context.Context, params *ec2.CreateSnapshotInput, optFns ...func(*ec2.Options)) (*ec2.CreateSnapshotOutput, error)
+	CreateVolume(ctx context.Context, params *ec2.CreateVolumeInput, optFns ...func(*ec2.Options)) (*ec2.CreateVolumeOutput, error)
+	DescribeSnapshots(ctx context.Context, params *ec2.DescribeSnapshotsInput, optFns ...func(*ec2.Options)) (*ec2.DescribeSnapshotsOutput, error)
+	DescribeVolumes(ctx context.Context, params *ec2.DescribeVolumesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeVolumesOutput, error)
+	DescribeSubnets(ctx context.Context, params *ec2.DescribeSubnetsInput, optFns ...func(*ec2.Options)) (*ec2.DescribeSubnetsOutput, error)
+	DescribeKeyPairs(ctx context.Context, params *ec2.DescribeKeyPairsInput, optFns ...func(*ec2.Options)) (*ec2.DescribeKeyPairsOutput, error)
+	StopInstances(ctx context.Context, params *ec2.StopInstancesInput, optFns ...func(*ec2.Options)) (*ec2.StopInstancesOutput, error)
+	StartInstances(ctx context.Context, params *ec2.StartInstancesInput, optFns ...func(*ec2.Options)) (*ec2.StartInstancesOutput, error)
+	NewInstanceRunningWaiter() interface {
+		Wait(ctx context.Context, params *ec2.DescribeInstancesInput, maxWaitDur time.Duration, optFns ...func(*ec2.InstanceRunningWaiterOptions)) error
+	}
+	NewInstanceStoppedWaiter() interface {
+		Wait(ctx context.Context, params *ec2.DescribeInstancesInput, maxWaitDur time.Duration, optFns ...func(*ec2.InstanceStoppedWaiterOptions)) error
+	}
+	NewInstanceTerminatedWaiter() interface {
+		Wait(ctx context.Context, params *ec2.DescribeInstancesInput, maxWaitDur time.Duration, optFns ...func(*ec2.InstanceTerminatedWaiterOptions)) error
+	}
+	NewVolumeAvailableWaiter() interface {
+		Wait(ctx context.Context, params *ec2.DescribeVolumesInput, maxWaitDur time.Duration, optFns ...func(*ec2.VolumeAvailableWaiterOptions)) error
+	}
 }
 
 // EC2ClientWrapper wraps the AWS SDK EC2 client to implement our EC2Client interface
@@ -104,78 +161,29 @@ type EC2ClientWrapper struct {
 }
 
 // NewInstanceRunningWaiter implements EC2Client
-func (c *EC2ClientWrapper) NewInstanceRunningWaiter() *ec2.InstanceRunningWaiter {
+func (c *EC2ClientWrapper) NewInstanceRunningWaiter() interface {
+	Wait(ctx context.Context, params *ec2.DescribeInstancesInput, maxWaitDur time.Duration, optFns ...func(*ec2.InstanceRunningWaiterOptions)) error
+} {
 	return ec2.NewInstanceRunningWaiter(c.Client)
 }
 
 // NewInstanceStoppedWaiter implements EC2Client
-func (c *EC2ClientWrapper) NewInstanceStoppedWaiter() *ec2.InstanceStoppedWaiter {
+func (c *EC2ClientWrapper) NewInstanceStoppedWaiter() interface {
+	Wait(ctx context.Context, params *ec2.DescribeInstancesInput, maxWaitDur time.Duration, optFns ...func(*ec2.InstanceStoppedWaiterOptions)) error
+} {
 	return ec2.NewInstanceStoppedWaiter(c.Client)
 }
 
 // NewInstanceTerminatedWaiter implements EC2Client
-func (c *EC2ClientWrapper) NewInstanceTerminatedWaiter() *ec2.InstanceTerminatedWaiter {
+func (c *EC2ClientWrapper) NewInstanceTerminatedWaiter() interface {
+	Wait(ctx context.Context, params *ec2.DescribeInstancesInput, maxWaitDur time.Duration, optFns ...func(*ec2.InstanceTerminatedWaiterOptions)) error
+} {
 	return ec2.NewInstanceTerminatedWaiter(c.Client)
 }
 
 // NewVolumeAvailableWaiter implements EC2Client
-func (c *EC2ClientWrapper) NewVolumeAvailableWaiter() *ec2.VolumeAvailableWaiter {
+func (c *EC2ClientWrapper) NewVolumeAvailableWaiter() interface {
+	Wait(ctx context.Context, params *ec2.DescribeVolumesInput, maxWaitDur time.Duration, optFns ...func(*ec2.VolumeAvailableWaiterOptions)) error
+} {
 	return ec2.NewVolumeAvailableWaiter(c.Client)
-}
-
-// DescribeSubnets implements EC2Client
-func (c *EC2ClientWrapper) DescribeSubnets(ctx context.Context, params *ec2.DescribeSubnetsInput, optFns ...func(*ec2.Options)) (*ec2.DescribeSubnetsOutput, error) {
-	return c.Client.DescribeSubnets(ctx, params, optFns...)
-}
-
-// DescribeKeyPairs implements EC2Client
-func (c *EC2ClientWrapper) DescribeKeyPairs(ctx context.Context, params *ec2.DescribeKeyPairsInput, optFns ...func(*ec2.Options)) (*ec2.DescribeKeyPairsOutput, error) {
-	return c.Client.DescribeKeyPairs(ctx, params, optFns...)
-}
-
-// loadAWSConfig loads the AWS configuration
-func loadAWSConfig(cfg *Config) (aws.Config, error) {
-	var optFns []func(*config.LoadOptions) error
-
-	if cfg.Profile != "" {
-		optFns = append(optFns, config.WithSharedConfigProfile(cfg.Profile))
-	}
-
-	if cfg.Region != "" {
-		optFns = append(optFns, config.WithRegion(cfg.Region))
-	}
-
-	return config.LoadDefaultConfig(context.Background(), optFns...)
-}
-
-// AssumeRole assumes an IAM role
-func AssumeRole(ctx context.Context, cfg aws.Config, roleARN string, mfaToken string) (*aws.Config, error) {
-	stsSvc := sts.NewFromConfig(cfg)
-	
-	assumeRoleInput := &sts.AssumeRoleInput{
-		RoleArn:         aws.String(roleARN),
-		RoleSessionName: aws.String("ec-manager-session"),
-	}
-
-	if mfaToken != "" {
-		assumeRoleInput.SerialNumber = aws.String("arn:aws:iam::ACCOUNT_ID:mfa/USER")
-		assumeRoleInput.TokenCode = aws.String(mfaToken)
-	}
-
-	creds := stscreds.NewAssumeRoleProvider(stsSvc, roleARN)
-	newCfg := cfg.Copy()
-	newCfg.Credentials = aws.NewCredentialsCache(creds)
-
-	return &newCfg, nil
-}
-
-// ListRoles lists available IAM roles
-func ListRoles(configFile string) error {
-	data, err := os.ReadFile(configFile)
-	if err != nil {
-		return fmt.Errorf("failed to read config file: %w", err)
-	}
-
-	log.Printf("Available roles in %s:\n%s", configFile, string(data))
-	return nil
 }

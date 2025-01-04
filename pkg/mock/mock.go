@@ -4,6 +4,13 @@ import (
 	"github.com/stretchr/testify/mock"
 )
 
+type contextKey string
+
+const (
+	// MockModeKey is the key for the mock mode in the context
+	MockModeKey contextKey = "mock-mode"
+)
+
 // Mock wraps testify/mock.Mock to provide a consistent mocking interface
 type Mock struct {
 	mock.Mock

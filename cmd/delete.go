@@ -16,7 +16,7 @@ var DeleteCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 		amiService := ami.NewService(awsClient.GetEC2Client())
-		
+
 		state, err := amiService.DeleteInstance(ctx, deleteInstanceID)
 		if err != nil {
 			return err
