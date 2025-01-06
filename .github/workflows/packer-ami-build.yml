@@ -75,3 +75,8 @@ jobs:
           name: packer-manifest
           path: packer/manifest.json
           retention-days: 30
+
+      - name: Cleanup
+        run: |
+          echo "Cleaning up..."
+          rm -rf ~/.ssh
