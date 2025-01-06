@@ -7,6 +7,12 @@ packer {
   }
 }
 
+locals {
+  timestamp = formatdate("YYYYMMDDhhmmss", timestamp())
+  version   = file("version.txt")
+  clean_version = replace(trimspace(local.version), "[^a-zA-Z0-9._-]", "")  # Remove any invalid characters
+}
+
 variable "aws_region" {
   type    = string
   default = "us-east-1"
@@ -24,7 +30,7 @@ variable "instance_type" {
 
 variable "ami_name_prefix" {
   type    = string
-  default = "ubuntu-custom"
+  default = "ubuntu-ami-base"
 }
 
 variable "ssh_username" {
@@ -35,12 +41,6 @@ variable "ssh_username" {
 variable "ssh_private_key_file" {
   type    = string
   default = "~/.ssh/packer-keypair.pem"
-}
-
-locals {
-  timestamp = formatdate("YYYYMMDDhhmmss", timestamp())
-  version   = file("version.txt")
-  clean_version = replace(trimspace(local.version), "[^a-zA-Z0-9._-]", "")  # Remove any invalid characters
 }
 
 source "amazon-ebs" "ubuntu" {
@@ -70,7 +70,7 @@ source "amazon-ebs" "ubuntu" {
 }
 
 build {
-  name = "ubuntu-custom"
+  name = var.ami_name_prefix
   sources = ["source.amazon-ebs.ubuntu"]
 
   provisioner "shell" {
