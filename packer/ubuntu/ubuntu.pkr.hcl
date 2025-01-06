@@ -95,6 +95,9 @@ build {
       "aws ec2 describe-images --filters Name=tag:OS,Values=Ubuntu Name=tag:ami-migrate,Values=latest --query 'Images[?ImageId!=`${build.ID}`].ImageId' --output text | tr '\t' '\n' | xargs -I {} aws ec2 create-tags --resources {} --tags Key=ami-migrate,Value=enabled || true",
       "aws ec2 create-tags --resources ${build.ID} --tags Key=ami-migrate,Value=latest",
       "echo 'AMI ${build.ID} is now tagged as latest'"
+    ],
+    "environment_vars" = [
+      "AWS_REGION=${var.aws_region}"
     ]
   }
 
