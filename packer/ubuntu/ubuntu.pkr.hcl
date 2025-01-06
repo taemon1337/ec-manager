@@ -32,6 +32,11 @@ variable "ssh_username" {
   default = "ubuntu"
 }
 
+variable "ssh_private_key_file" {
+  type    = string
+  default = "~/.ssh/packer-keypair.pem"
+}
+
 locals {
   timestamp = formatdate("YYYYMMDDhhmmss", timestamp())
   version   = file("version.txt")
@@ -43,6 +48,8 @@ source "amazon-ebs" "ubuntu" {
   instance_type = var.instance_type
   region        = var.aws_region
   source_ami    = var.source_ami
+
+  ssh_private_key_file = var.ssh_private_key_file
 
   ssh_username = var.ssh_username
 
