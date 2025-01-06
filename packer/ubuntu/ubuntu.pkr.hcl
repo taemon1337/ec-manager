@@ -49,7 +49,7 @@ variable "ssh_private_key_file" {
 }
 
 source "amazon-ebs" "ubuntu" {
-  ami_name      = "${var.ami_name_prefix}-v${local.clean_version}"
+  ami_name      = "${var.ami_name_prefix}-v${local.clean_version}-${local.timestamp}"
   instance_type = var.instance_type
   region        = var.aws_region
   source_ami    = var.source_ami
@@ -63,7 +63,7 @@ source "amazon-ebs" "ubuntu" {
   ssh_username = var.ssh_username
 
   tags = {
-    Name        = "${var.ami_name_prefix}-v${local.version}"
+    Name        = "${var.ami_name_prefix}-v${local.version}-${local.timestamp}"
     OS          = "Ubuntu"
     Version     = local.version
     BuildDate   = formatdate("YYYY-MM-DD", timestamp())
