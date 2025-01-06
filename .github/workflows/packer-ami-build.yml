@@ -50,7 +50,7 @@ jobs:
       - name: Write Secret to File
         env:
           SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
-          SSH_PRIVATE_KEY_NAME: ${{ secrets.SSH_PRIVATE_KEY_NAME }}
+          SSH_PRIVATE_KEY_NAME: ${{ vars.SSH_PRIVATE_KEY_NAME }}
         run: |
           mkdir -p ~/.ssh
           echo "$SSH_PRIVATE_KEY" > ~/.ssh/${SSH_PRIVATE_KEY_NAME}
@@ -61,7 +61,7 @@ jobs:
           AWS_REGION: ${{ secrets.AWS_REGION || 'us-east-1' }}
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          SSH_PRIVATE_KEY_NAME: ${{ secrets.SSH_PRIVATE_KEY_NAME }}
+          SSH_PRIVATE_KEY_NAME: ${{ vars.SSH_PRIVATE_KEY_NAME }}
         run: |
           ls ~/.ssh/${SSH_PRIVATE_KEY_NAME}
           make docker-build
