@@ -38,7 +38,7 @@ variable "ssh_username" {
   default = "ubuntu"
 }
 
-variable "keypair_name" {
+variable "ssh_keypair_name" {
   type    = string
   default = "packer-keypair"
 }
@@ -55,7 +55,7 @@ source "amazon-ebs" "ubuntu" {
   source_ami    = var.source_ami
 
   # create the instance with the specified key
-  key_name = var.keypair_name
+  ssh_keypair_name = var.ssh_keypair_name
 
   # use the specified SSH private key (must correspond to the private key in the keypair)
   ssh_private_key_file = var.ssh_private_key_file
