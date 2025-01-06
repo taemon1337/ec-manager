@@ -50,10 +50,11 @@ jobs:
       - name: Write Secret to File
         env:
           SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_PRIVATE_KEY_NAME: ${{ secrets.SSH_PRIVATE_KEY_NAME }}
         run: |
           mkdir -p ~/.ssh
-          echo "$SSH_PRIVATE_KEY" > ~/.ssh/$SSH_PRIVATE_KEY_NAME
-          chmod 600 ~/.ssh/$SSH_PRIVATE_KEY_NAME
+          echo "$SSH_PRIVATE_KEY" > ~/.ssh/${SSH_PRIVATE_KEY_NAME}
+          chmod 600 ~/.ssh/${SSH_PRIVATE_KEY_NAME}
 
       - name: Build Ubuntu AMI
         env:
@@ -62,7 +63,7 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           SSH_PRIVATE_KEY_NAME: ${{ secrets.SSH_PRIVATE_KEY_NAME }}
         run: |
-          ls ~/.ssh/$SSH_PRIVATE_KEY_NAME
+          ls ~/.ssh/${SSH_PRIVATE_KEY_NAME}
           make docker-build
           make init
           make ubuntu
