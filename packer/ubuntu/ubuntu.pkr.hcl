@@ -97,7 +97,7 @@ build {
       "echo 'AMI ${build.ID} is now tagged as latest'"
     ]
     environment_vars = [
-      "AWS_REGION=${var.aws_region}"
+      "AWS_DEFAULT_REGION=${var.aws_region}"
     ]
   }
 
