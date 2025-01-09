@@ -67,7 +67,7 @@ source "amazon-ebs" "ubuntu" {
     OS          = "Ubuntu"
     Version     = local.version
     BuildDate   = formatdate("YYYY-MM-DD", timestamp())
-    ami-migrate = "enabled"
+    ami-migrate = "latest"
   }
 
   launch_block_device_mappings {
