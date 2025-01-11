@@ -7,6 +7,11 @@ packer {
   }
 }
 
+variable "project" {
+  type    = string
+  default = "ec-manager"
+}
+
 variable "aws_region" {
   type    = string
   default = "us-east-1"
@@ -32,6 +37,16 @@ variable "ssh_username" {
   default = "ec2-user"
 }
 
+variable "ssh_keypair_name" {
+  type    = string
+  default = "packer-keypair"
+}
+
+variable "ssh_private_key_file" {
+  type    = string
+  default = "~/.ssh/packer-keypair.pem"
+}
+
 locals {
   timestamp = formatdate("YYYYMMDDhhmmss", timestamp())
   version   = file("version.txt")
@@ -44,14 +59,21 @@ source "amazon-ebs" "rhel9" {
   region        = var.aws_region
   source_ami    = var.source_ami
 
+  # create the instance with the specified key
+  ssh_keypair_name = var.ssh_keypair_name
+
+  # use the specified SSH private key (must correspond to the private key in the keypair)
+  ssh_private_key_file = var.ssh_private_key_file
+
   ssh_username = var.ssh_username
 
   tags = {
-    Name        = "${var.ami_name_prefix}-v${local.version}"
+    Name        = "${var.ami_name_prefix}-v${local.version}-${local.timestamp}"
     OS          = "RHEL9"
     Version     = local.version
     BuildDate   = formatdate("YYYY-MM-DD", timestamp())
-    "ami-migrate" = "enabled"
+    ami-migrate = "latest"
+    Project     = var.project
   }
 
   launch_block_device_mappings {

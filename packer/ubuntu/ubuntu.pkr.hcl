@@ -13,6 +13,11 @@ locals {
   clean_version = replace(trimspace(local.version), "[^a-zA-Z0-9._-]", "")  # Remove any invalid characters
 }
 
+variable "project" {
+  type    = string
+  default = "ec-manager"
+}
+
 variable "aws_region" {
   type    = string
   default = "us-east-1"
@@ -68,6 +73,7 @@ source "amazon-ebs" "ubuntu" {
     Version     = local.version
     BuildDate   = formatdate("YYYY-MM-DD", timestamp())
     ami-migrate = "latest"
+    Project     = var.project
   }
 
   launch_block_device_mappings {
